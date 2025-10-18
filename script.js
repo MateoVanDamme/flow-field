@@ -299,10 +299,16 @@ function setupControls() {
         .name('Particle Count')
         .disable();
 
-    // Add keyboard shortcut to toggle GUI (press 'h' to hide/show)
+    // Add keyboard shortcut to toggle GUI and Stats (press 'd' for debug)
     window.addEventListener('keydown', (e) => {
-        if (e.key === 'h' || e.key === 'H') {
-            gui._hidden ? gui.show() : gui.hide();
+        if (e.key === 'd' || e.key === 'D') {
+            if (gui._hidden) {
+                gui.show();
+                stats.dom.style.display = 'block';
+            } else {
+                gui.hide();
+                stats.dom.style.display = 'none';
+            }
         }
     });
 

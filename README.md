@@ -12,7 +12,7 @@ A 3D particle flow field visualization built with Three.js. Particles follow a P
 
 ## Controls
 
-Press **H** to show/hide the control panel:
+Press **D** to show/hide debug controls (GUI + FPS counter):
 - **Noise Scale**: Granularity of the flow field
 - **Flow Speed**: How quickly particles respond to forces
 - **Trail Length**: How long particle trails persist

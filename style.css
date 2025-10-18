@@ -7,14 +7,3 @@ body {
 canvas {
     display: block;
 }
-
-#info {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    color: #fff;
-    font-family: monospace;
-    font-size: 14px;
-    pointer-events: none;
-    text-shadow: 1px 1px 2px #000;
-}
