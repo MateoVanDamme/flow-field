@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flow Field Visualization - Camera Interactive</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        #webcam {
+            display: none;
+        }
+        #videoCanvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="videoCanvas"></canvas>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="script2.js"></script>
+</body>
+</html>
