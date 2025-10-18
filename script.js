@@ -1,6 +1,8 @@
 // Use three.js ImprovedNoise implementation
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+import Stats from 'three/addons/libs/stats.module.js';
 import { vertexShader, fragmentShader } from './shaders/fade.js';
 
 // Three.js Scene Setup
@@ -14,6 +16,9 @@ let particleSystem;
 let renderTargetA, renderTargetB;
 let fadeScene, fadeCamera, fadeMaterial;
 let currentRenderTarget = 0;
+
+// Stats
+let stats;
 
 // Configuration
 const config = {
@@ -101,6 +106,10 @@ function init() {
 
     // Initialize Perlin noise
     perlin = new ImprovedNoise();
+
+    // Setup Stats
+    stats = new Stats();
+    document.body.appendChild(stats.dom);
 
     // Setup render targets for trail persistence
     setupRenderTargets();
@@ -253,60 +262,57 @@ function updateParticles() {
 }
 
 function setupControls() {
-    const noiseScale = document.getElementById('noiseScale');
-    const noiseScaleValue = document.getElementById('noiseScaleValue');
-    noiseScale.addEventListener('input', (e) => {
-        config.noiseScale = parseFloat(e.target.value);
-        noiseScaleValue.textContent = config.noiseScale.toFixed(3);
-    });
+    const gui = new GUI();
 
-    const flowSpeed = document.getElementById('flowSpeed');
-    const flowSpeedValue = document.getElementById('flowSpeedValue');
-    flowSpeed.addEventListener('input', (e) => {
-        config.flowSpeed = parseFloat(e.target.value);
-        flowSpeedValue.textContent = config.flowSpeed.toFixed(1);
-    });
+    // Noise Scale control
+    gui.add(config, 'noiseScale', 0.001, 0.01, 0.001)
+        .name('Noise Scale')
+        .onChange((value) => {
+            config.noiseScale = value;
+        });
 
-    const trailLength = document.getElementById('trailLength');
-    const trailLengthValue = document.getElementById('trailLengthValue');
-    trailLength.min = '0.97';
-    trailLength.max = '0.9999';
-    trailLength.step = '0.0001';
-    trailLength.value = config.fadeSpeed.toString();
-    trailLengthValue.textContent = 'Long';
+    // Flow Speed control
+    gui.add(config, 'flowSpeed', 0.1, 2, 0.1)
+        .name('Flow Speed')
+        .onChange((value) => {
+            config.flowSpeed = value;
+        });
 
-    trailLength.addEventListener('input', (e) => {
-        config.fadeSpeed = parseFloat(e.target.value);
-        fadeMaterial.uniforms.fadeAmount.value = config.fadeSpeed;
+    // Trail Length (Fade Speed) control
+    gui.add(config, 'fadeSpeed', 0.97, 0.9999, 0.0001)
+        .name('Trail Length')
+        .onChange((value) => {
+            config.fadeSpeed = value;
+            fadeMaterial.uniforms.fadeAmount.value = value;
+        });
 
-        // Update label based on fade speed
-        if (config.fadeSpeed < 0.980) {
-            trailLengthValue.textContent = 'Short';
-        } else if (config.fadeSpeed < 0.990) {
-            trailLengthValue.textContent = 'Medium';
-        } else if (config.fadeSpeed < 0.995) {
-            trailLengthValue.textContent = 'Long';
-        } else if (config.fadeSpeed < 0.998) {
-            trailLengthValue.textContent = 'Very Long';
-        } else if (config.fadeSpeed < 0.9995) {
-            trailLengthValue.textContent = 'Extreme';
-        } else {
-            trailLengthValue.textContent = 'Infinite';
+    // Particle Size control
+    gui.add(config, 'particleSize', 0.5, 5, 0.5)
+        .name('Particle Size')
+        .onChange((value) => {
+            config.particleSize = value;
+            particleSystem.material.size = value;
+        });
+
+    // Particle Count display (read-only)
+    gui.add(config, 'particleCount')
+        .name('Particle Count')
+        .disable();
+
+    // Add keyboard shortcut to toggle GUI (press 'h' to hide/show)
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'h' || e.key === 'H') {
+            gui._hidden ? gui.show() : gui.hide();
         }
     });
 
-    const trailOpacity = document.getElementById('trailOpacity');
-    const trailOpacityValue = document.getElementById('trailOpacityValue');
-    trailOpacity.addEventListener('input', (e) => {
-        const size = parseFloat(e.target.value);
-        config.particleSize = size;
-        particleSystem.material.size = size;
-        trailOpacityValue.textContent = size.toFixed(1);
-    });
+    return gui;
 }
 
 function animate() {
     requestAnimationFrame(animate);
+
+    stats.begin();
 
     time += 0.005;
 
@@ -339,6 +345,8 @@ function animate() {
 
     // Swap buffers
     currentRenderTarget = 1 - currentRenderTarget;
+
+    stats.end();
 }
 
 function onWindowResize() {
