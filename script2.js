@@ -207,6 +207,8 @@ function init() {
 
     // Create a texture from the canvas
     forceFieldTexture = new THREE.CanvasTexture(forceFieldCanvas);
+    forceFieldTexture.minFilter = THREE.LinearFilter;
+    forceFieldTexture.magFilter = THREE.LinearFilter;
 
     // Create orthographic background scene for force field
     backgroundScene = new THREE.Scene();
