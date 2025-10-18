@@ -25,7 +25,7 @@ let stats;
 // Webcam
 let video, videoCanvas, videoContext;
 let videoData = null;
-const VIDEO_WIDTH = 80;  // Low res for performance
+const VIDEO_WIDTH = 80;  // Low res for performance (increase for better quality, decrease for better FPS)
 const VIDEO_HEIGHT = 60;
 
 // Force field visualization
@@ -132,12 +132,12 @@ function drawForceField() {
             // Calculate brightness (0-1)
             const brightness = (r + g + b) / (3 * 255);
 
-            // Invert so darker areas show as brighter red
+            // Darker areas = stronger force (inverted)
             const force = 1.0 - brightness;
 
-            // Draw pixel
-            if (force > 0.1) {
-                const intensity = Math.floor(force * 255);
+            // But show it correctly (not inverted) in the visualization
+            if (brightness > 0.1) {
+                const intensity = Math.floor(brightness * 255);
                 forceFieldContext.fillStyle = `rgb(${intensity}, 0, 0)`;
                 forceFieldContext.fillRect(x, y, 1, 1);
             }

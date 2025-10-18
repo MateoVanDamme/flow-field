@@ -16,8 +16,9 @@ uniform float fadeAmount;
 varying vec2 vUv;
 
 void main() {
-    // Get the background (camera force field)
+    // Get the background (camera force field) and make it darker
     vec4 background = texture2D(tBackground, vUv);
+    background.rgb *= 0.3; // Darken the red camera preview
 
     // Get the faded particles
     vec4 texel = texture2D(tDiffuse, vUv);
