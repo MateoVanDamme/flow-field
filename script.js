@@ -37,7 +37,7 @@ const config = {
     particleCount: 10000,
     perlinScale: 0.007,
     flowSpeed: 0.5,
-    trailDecay: 0.001, // Amount subtracted per frame (lower = longer trails)
+    trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 0.2, // Smaller default size
     bounds: 500,
     cameraInfluence: 3.0  // How much the camera affects the flow field
@@ -70,13 +70,19 @@ class Particle {
         this.velocity.multiplyScalar(0.97);
         this.position.add(this.velocity);
 
+        // Check if particle is out of bounds
         const halfBounds = config.bounds / 2;
-        if (this.position.x > halfBounds) this.position.x = -halfBounds;
-        if (this.position.x < -halfBounds) this.position.x = halfBounds;
-        if (this.position.y > halfBounds) this.position.y = -halfBounds;
-        if (this.position.y < -halfBounds) this.position.y = halfBounds;
-        if (this.position.z > halfBounds) this.position.z = -halfBounds;
-        if (this.position.z < -halfBounds) this.position.z = halfBounds;
+        if (this.position.x > halfBounds || this.position.x < -halfBounds ||
+            this.position.y > halfBounds || this.position.y < -halfBounds ||
+            this.position.z > halfBounds || this.position.z < -halfBounds) {
+            // Teleport to random position and reset velocity
+            this.position.set(
+                (Math.random() - 0.5) * config.bounds,
+                (Math.random() - 0.5) * config.bounds,
+                (Math.random() - 0.5) * config.bounds
+            );
+            this.velocity.set(0, 0, 0);
+        }
     }
 }
 
@@ -265,7 +271,7 @@ function setupRenderTargets() {
         uniforms: {
             tDiffuse: { value: null },
             tBackground: { value: forceFieldTexture },
-            trailDecay: { value: config.trailDecay }
+            trailDecay: { value: config.trailDecay * 0.0001 }
         },
         vertexShader,
         fragmentShader,
@@ -411,14 +417,14 @@ function setupControls() {
             config.flowSpeed = value;
         });
 
-    gui.add(config, 'trailDecay', 0.0001, 0.005, 0.0001)
+    gui.add(config, 'trailDecay', 0.1, 50, 0.1)
         .name('Trail Decay')
         .onChange((value) => {
             config.trailDecay = value;
-            fadeMaterial.uniforms.trailDecay.value = value;
+            fadeMaterial.uniforms.trailDecay.value = value * 0.0001;
         });
 
-    gui.add(config, 'particleSize', 0.2, 1, 0.1)
+    gui.add(config, 'particleSize', 0.005, 0.5, 0.005)
         .name('Particle Size')
         .onChange((value) => {
             config.particleSize = value;
