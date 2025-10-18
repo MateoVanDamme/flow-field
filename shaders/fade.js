@@ -12,7 +12,7 @@ void main() {
 export const fragmentShader = `
 uniform sampler2D tDiffuse;
 uniform sampler2D tBackground;
-uniform float fadeAmount;
+uniform float trailDecay;
 varying vec2 vUv;
 
 void main() {
@@ -42,10 +42,11 @@ void main() {
 
     vec3 background = blurred * 0.3; // Darken the red camera preview
 
-    // Get the faded particles
+    // Get the faded particles - linear decay
     vec4 texel = texture2D(tDiffuse, vUv);
-    vec3 fadedColor = texel.rgb * fadeAmount;
-    fadedColor = max(fadedColor - vec3(0.003), vec3(0.0));
+
+    // Subtract the decay amount directly and clamp to zero
+    vec3 fadedColor = max(texel.rgb - vec3(trailDecay), vec3(0.0));
 
     // Composite: background + particles on top
     vec3 finalColor = background + fadedColor;

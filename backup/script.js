@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import Stats from 'three/addons/libs/stats.module.js';
-import { vertexShader, fragmentShader } from './shaders/fade.js';
+import { vertexShader, fragmentShader } from './fade-simple.js';
 
 // Three.js Scene Setup
 let scene, camera, renderer;
@@ -22,11 +22,11 @@ let stats;
 
 // Configuration
 const config = {
-    particleCount: 10000,
-    noiseScale: 0.003,
+    particleCount: 3000,
+    perlinScale: 0.007,
     flowSpeed: 0.5,
-    fadeSpeed: 0.992, // Higher = slower fade (0.95 = fast, 0.99 = very slow)
-    particleSize: 2,
+    trailDecay: 0.001, // Amount subtracted per frame (lower = longer trails)
+    particleSize: 0.2, // Smaller default size
     bounds: 500
 };
 
@@ -41,11 +41,11 @@ class Particle {
         this.velocity = new THREE.Vector3(0, 0, 0);
 
         // Random size - bigger particles are slightly brighter blue
-        this.size = 0.5 + Math.random() * 3;
+        this.size = 0.5 + Math.random() * 2; // Less variation
 
         // Color - all dark blue range, no white
         this.color = new THREE.Color();
-        const sizeNormalized = (this.size - 0.5) / 3; // 0 to 1
+        const sizeNormalized = (this.size - 0.5) / 2; // Adjust normalization
 
         // All particles are shades of blue
         const brightness = Math.pow(sizeNormalized, 2);
@@ -130,6 +130,7 @@ function setupRenderTargets() {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
         format: THREE.RGBAFormat,
+        type: THREE.FloatType, // Use floating point for better precision
         stencilBuffer: false
     };
 
@@ -149,11 +150,11 @@ function setupRenderTargets() {
     fadeScene = new THREE.Scene();
     fadeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-    // Create a material that renders the previous frame with slight transparency
+    // Create a material that renders the previous frame with linear decay
     fadeMaterial = new THREE.ShaderMaterial({
         uniforms: {
             tDiffuse: { value: null },
-            fadeAmount: { value: config.fadeSpeed }
+            trailDecay: { value: config.trailDecay }
         },
         vertexShader,
         fragmentShader,
@@ -230,12 +231,12 @@ function createParticles() {
 }
 
 function getForceField(x, y, z, t) {
-    const scale = config.noiseScale;
+    const scale = config.perlinScale;
 
     // Use 4D noise (x, y, z, time) for animated flow field
-    const noiseX = perlin.noise(x * scale, y * scale, z * scale + t);
-    const noiseY = perlin.noise(x * scale + 100, y * scale, z * scale + t);
-    const noiseZ = perlin.noise(x * scale, y * scale + 100, z * scale + t);
+    const noiseX = perlin.noise(x * scale, y * scale, z * scale + t * 0.01);
+    const noiseY = perlin.noise(x * scale + 100, y * scale, z * scale + t  * 0.01);
+    const noiseZ = perlin.noise(x * scale, y * scale + 100, z * scale + t * 0.01);
 
     // Convert noise (-1 to 1) to force vector
     const force = new THREE.Vector3(
@@ -264,11 +265,11 @@ function updateParticles() {
 function setupControls() {
     const gui = new GUI();
 
-    // Noise Scale control
-    gui.add(config, 'noiseScale', 0.001, 0.01, 0.001)
-        .name('Noise Scale')
+    // Perlin Scale control
+    gui.add(config, 'perlinScale', 0.001, 0.01, 0.001)
+        .name('Perlin Scale')
         .onChange((value) => {
-            config.noiseScale = value;
+            config.perlinScale = value;
         });
 
     // Flow Speed control
@@ -278,16 +279,16 @@ function setupControls() {
             config.flowSpeed = value;
         });
 
-    // Trail Length (Fade Speed) control
-    gui.add(config, 'fadeSpeed', 0.97, 0.9999, 0.0001)
-        .name('Trail Length')
+    // Trail Decay control
+    gui.add(config, 'trailDecay', 0.0001, 0.005, 0.0001)
+        .name('Trail Decay')
         .onChange((value) => {
-            config.fadeSpeed = value;
-            fadeMaterial.uniforms.fadeAmount.value = value;
+            config.trailDecay = value;
+            fadeMaterial.uniforms.trailDecay.value = value;
         });
 
     // Particle Size control
-    gui.add(config, 'particleSize', 0.5, 5, 0.5)
+    gui.add(config, 'particleSize', 0.2, 1, 0.1)
         .name('Particle Size')
         .onChange((value) => {
             config.particleSize = value;

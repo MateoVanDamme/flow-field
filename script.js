@@ -35,10 +35,10 @@ let forceFieldTexture, forceFieldMaterial, forceFieldPlane;
 // Configuration
 const config = {
     particleCount: 10000,
-    noiseScale: 0.003,
+    perlinScale: 0.007,
     flowSpeed: 0.5,
-    fadeSpeed: 0.992,
-    particleSize: 2,
+    trailDecay: 0.001, // Amount subtracted per frame (lower = longer trails)
+    particleSize: 0.2, // Smaller default size
     bounds: 500,
     cameraInfluence: 3.0  // How much the camera affects the flow field
 };
@@ -52,9 +52,9 @@ class Particle {
             (Math.random() - 0.5) * config.bounds
         );
         this.velocity = new THREE.Vector3(0, 0, 0);
-        this.size = 0.5 + Math.random() * 3;
+        this.size = 0.5 + Math.random() * 2; // Less variation (3 -> 2)
         this.color = new THREE.Color();
-        const sizeNormalized = (this.size - 0.5) / 3;
+        const sizeNormalized = (this.size - 0.5) / 2; // Adjust normalization
         const brightness = Math.pow(sizeNormalized, 2);
 
         this.color.setRGB(
@@ -242,6 +242,7 @@ function setupRenderTargets() {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
         format: THREE.RGBAFormat,
+        type: THREE.FloatType, // Use floating point for better precision
         stencilBuffer: false
     };
 
@@ -264,7 +265,7 @@ function setupRenderTargets() {
         uniforms: {
             tDiffuse: { value: null },
             tBackground: { value: forceFieldTexture },
-            fadeAmount: { value: config.fadeSpeed }
+            trailDecay: { value: config.trailDecay }
         },
         vertexShader,
         fragmentShader,
@@ -358,7 +359,7 @@ function createParticles() {
 }
 
 function getForceField(x, y, z, t) {
-    const scale = config.noiseScale;
+    const scale = config.perlinScale;
 
     // Base Perlin noise flow field
     const noiseX = perlin.noise(x * scale, y * scale, z * scale + t);
@@ -398,10 +399,10 @@ function updateParticles() {
 function setupControls() {
     const gui = new GUI();
 
-    gui.add(config, 'noiseScale', 0.001, 0.01, 0.001)
-        .name('Noise Scale')
+    gui.add(config, 'perlinScale', 0.001, 0.01, 0.001)
+        .name('Perlin Scale')
         .onChange((value) => {
-            config.noiseScale = value;
+            config.perlinScale = value;
         });
 
     gui.add(config, 'flowSpeed', 0.1, 2, 0.1)
@@ -410,14 +411,14 @@ function setupControls() {
             config.flowSpeed = value;
         });
 
-    gui.add(config, 'fadeSpeed', 0.97, 0.9999, 0.0001)
-        .name('Trail Length')
+    gui.add(config, 'trailDecay', 0.0001, 0.005, 0.0001)
+        .name('Trail Decay')
         .onChange((value) => {
-            config.fadeSpeed = value;
-            fadeMaterial.uniforms.fadeAmount.value = value;
+            config.trailDecay = value;
+            fadeMaterial.uniforms.trailDecay.value = value;
         });
 
-    gui.add(config, 'particleSize', 0.5, 5, 0.5)
+    gui.add(config, 'particleSize', 0.2, 1, 0.1)
         .name('Particle Size')
         .onChange((value) => {
             config.particleSize = value;
