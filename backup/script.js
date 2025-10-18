@@ -22,11 +22,11 @@ let stats;
 
 // Configuration
 const config = {
-    particleCount: 10000,
+    particleCount: 50000,
     perlinScale: 0.007,
-    flowSpeed: 10.0,
+    flowSpeed: 20.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
-    particleSize: 0.2, // Smaller default size
+    particleSize: 2.0, // Smaller default size
     bounds: 500
 };
 
@@ -270,7 +270,7 @@ function setupControls() {
         });
 
     // Flow Speed control
-    gui.add(config, 'flowSpeed', 0.1, 20, 0.1)
+    gui.add(config, 'flowSpeed', 0.1, 40, 0.1)
         .name('Flow Speed')
         .onChange((value) => {
             config.flowSpeed = value;
@@ -285,7 +285,7 @@ function setupControls() {
         });
 
     // Particle Size control
-    gui.add(config, 'particleSize', 0.005, 0.5, 0.005)
+    gui.add(config, 'particleSize', 0.5, 5.0, 0.01)
         .name('Particle Size')
         .onChange((value) => {
             config.particleSize = value;
