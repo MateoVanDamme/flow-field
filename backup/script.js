@@ -24,7 +24,7 @@ let stats;
 const config = {
     particleCount: 10000,
     perlinScale: 0.007,
-    flowSpeed: 0.5,
+    flowSpeed: 10.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 0.2, // Smaller default size
     bounds: 500
@@ -36,9 +36,8 @@ class Particle {
         this.position = new THREE.Vector3(
             (Math.random() - 0.5) * config.bounds,
             (Math.random() - 0.5) * config.bounds,
-            (Math.random() - 0.5) * config.bounds
+            0  // 2D - all particles on the same Z plane
         );
-        this.velocity = new THREE.Vector3(0, 0, 0);
 
         // Random size - bigger particles are slightly brighter blue
         this.size = 0.5 + Math.random() * 2; // Less variation
@@ -59,30 +58,22 @@ class Particle {
     }
 
     update(time) {
-        // Get force from flow field
-        const force = getForceField(this.position.x, this.position.y, this.position.z, time);
+        // Use force field directly as velocity (2D only)
+        const force = getForceField(this.position.x, this.position.y, time);
+        this.position.x += force.x * 0.01 * config.flowSpeed;
+        this.position.y += force.y * 0.01 * config.flowSpeed;
+        // Z stays at 0
 
-        // Update velocity with force
-        this.velocity.add(force.multiplyScalar(0.01 * config.flowSpeed));
-
-        // Apply damping
-        this.velocity.multiplyScalar(0.97);
-
-        // Update position
-        this.position.add(this.velocity);
-
-        // Check if particle is out of bounds
+        // Check if particle is out of bounds (2D only)
         const halfBounds = config.bounds / 2;
         if (this.position.x > halfBounds || this.position.x < -halfBounds ||
-            this.position.y > halfBounds || this.position.y < -halfBounds ||
-            this.position.z > halfBounds || this.position.z < -halfBounds) {
-            // Teleport to random position and reset velocity
+            this.position.y > halfBounds || this.position.y < -halfBounds) {
+            // Teleport to random position
             this.position.set(
                 (Math.random() - 0.5) * config.bounds,
                 (Math.random() - 0.5) * config.bounds,
-                (Math.random() - 0.5) * config.bounds
+                0
             );
-            this.velocity.set(0, 0, 0);
         }
     }
 }
@@ -91,15 +82,18 @@ function init() {
     // Create scene
     scene = new THREE.Scene();
 
-    // Create camera
-    camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
+    // Orthographic camera for 2D view
+    const aspect = window.innerWidth / window.innerHeight;
+    const viewSize = 300;
+    camera = new THREE.OrthographicCamera(
+        -viewSize * aspect,
+        viewSize * aspect,
+        viewSize,
+        -viewSize,
         1,
         1000
     );
-    camera.position.z = 300;
-    camera.position.y = 50;
+    camera.position.z = 100;
     camera.lookAt(0, 0, 0);
 
     // Create renderer
@@ -235,19 +229,17 @@ function createParticles() {
     scene.add(particleSystem);
 }
 
-function getForceField(x, y, z, t) {
+function getForceField(x, y, t) {
     const scale = config.perlinScale;
 
-    // Use 4D noise (x, y, z, time) for animated flow field
-    const noiseX = perlin.noise(x * scale, y * scale, z * scale + t * 0.01);
-    const noiseY = perlin.noise(x * scale + 100, y * scale, z * scale + t  * 0.01);
-    const noiseZ = perlin.noise(x * scale, y * scale + 100, z * scale + t * 0.01);
+    // 2D Perlin noise flow field (using time as z-offset for animation)
+    const noiseX = perlin.noise(x * scale, y * scale, t * 0.01);
+    const noiseY = perlin.noise(x * scale + 100, y * scale, t * 0.01);
 
-    // Convert noise (-1 to 1) to force vector
-    const force = new THREE.Vector3(
+    // Convert noise (-1 to 1) to 2D force vector
+    const force = new THREE.Vector2(
         noiseX * 2,
-        noiseY * 2,
-        noiseZ * 2
+        noiseY * 2
     );
 
     return force;
@@ -278,7 +270,7 @@ function setupControls() {
         });
 
     // Flow Speed control
-    gui.add(config, 'flowSpeed', 0.1, 2, 0.1)
+    gui.add(config, 'flowSpeed', 0.1, 20, 0.1)
         .name('Flow Speed')
         .onChange((value) => {
             config.flowSpeed = value;
@@ -328,11 +320,6 @@ function animate() {
 
     time += 0.005;
 
-    // Rotate camera slowly
-    camera.position.x = Math.sin(time * 0.1) * 300;
-    camera.position.z = Math.cos(time * 0.1) * 300;
-    camera.lookAt(0, 0, 0);
-
     // Update particles
     updateParticles();
 
@@ -362,7 +349,12 @@ function animate() {
 }
 
 function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const aspect = window.innerWidth / window.innerHeight;
+    const viewSize = 300;
+    camera.left = -viewSize * aspect;
+    camera.right = viewSize * aspect;
+    camera.top = viewSize;
+    camera.bottom = -viewSize;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 

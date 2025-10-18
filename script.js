@@ -36,7 +36,7 @@ let forceFieldTexture, forceFieldMaterial, forceFieldPlane;
 const config = {
     particleCount: 10000,
     perlinScale: 0.007,
-    flowSpeed: 0.5,
+    flowSpeed: 20.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 0.2, // Smaller default size
     bounds: 500,
@@ -49,9 +49,8 @@ class Particle {
         this.position = new THREE.Vector3(
             (Math.random() - 0.5) * config.bounds,
             (Math.random() - 0.5) * config.bounds,
-            (Math.random() - 0.5) * config.bounds
+            0  // 2D - all particles on the same Z plane
         );
-        this.velocity = new THREE.Vector3(0, 0, 0);
         this.size = 0.5 + Math.random() * 2; // Less variation (3 -> 2)
         this.color = new THREE.Color();
         const sizeNormalized = (this.size - 0.5) / 2; // Adjust normalization
@@ -65,23 +64,22 @@ class Particle {
     }
 
     update(time) {
-        const force = getForceField(this.position.x, this.position.y, this.position.z, time);
-        this.velocity.add(force.multiplyScalar(0.01 * config.flowSpeed));
-        this.velocity.multiplyScalar(0.97);
-        this.position.add(this.velocity);
+        // Use force field directly as velocity (2D only)
+        const force = getForceField(this.position.x, this.position.y, time);
+        this.position.x += force.x * 0.01 * config.flowSpeed;
+        this.position.y += force.y * 0.01 * config.flowSpeed;
+        // Z stays at 0
 
-        // Check if particle is out of bounds
+        // Check if particle is out of bounds (2D only)
         const halfBounds = config.bounds / 2;
         if (this.position.x > halfBounds || this.position.x < -halfBounds ||
-            this.position.y > halfBounds || this.position.y < -halfBounds ||
-            this.position.z > halfBounds || this.position.z < -halfBounds) {
-            // Teleport to random position and reset velocity
+            this.position.y > halfBounds || this.position.y < -halfBounds) {
+            // Teleport to random position
             this.position.set(
                 (Math.random() - 0.5) * config.bounds,
                 (Math.random() - 0.5) * config.bounds,
-                (Math.random() - 0.5) * config.bounds
+                0
             );
-            this.velocity.set(0, 0, 0);
         }
     }
 }
@@ -184,14 +182,18 @@ function getVideoBrightness(x, y, z) {
 function init() {
     scene = new THREE.Scene();
 
-    camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
+    // Orthographic camera for 2D view
+    const aspect = window.innerWidth / window.innerHeight;
+    const viewSize = 300;
+    camera = new THREE.OrthographicCamera(
+        -viewSize * aspect,
+        viewSize * aspect,
+        viewSize,
+        -viewSize,
         1,
         1000
     );
-    camera.position.z = 300;
-    camera.position.y = 50;
+    camera.position.z = 100;
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -364,25 +366,23 @@ function createParticles() {
     scene.add(particleSystem);
 }
 
-function getForceField(x, y, z, t) {
+function getForceField(x, y, t) {
     const scale = config.perlinScale;
 
-    // Base Perlin noise flow field
-    const noiseX = perlin.noise(x * scale, y * scale, z * scale + t);
-    const noiseY = perlin.noise(x * scale + 100, y * scale, z * scale + t);
-    const noiseZ = perlin.noise(x * scale, y * scale + 100, z * scale + t);
+    // 2D Perlin noise flow field (using time as z-offset for animation)
+    const noiseX = perlin.noise(x * scale, y * scale, t);
+    const noiseY = perlin.noise(x * scale + 100, y * scale, t);
 
     // Get brightness from camera feed
-    const brightness = getVideoBrightness(x, y, z);
+    const brightness = getVideoBrightness(x, y, 0);
 
     // Darker areas (higher brightness value after inversion) create stronger forces
     const cameraForce = brightness * config.cameraInfluence;
 
-    // Combine noise with camera influence
-    const force = new THREE.Vector3(
+    // Combine noise with camera influence (2D vector only)
+    const force = new THREE.Vector2(
         noiseX * 2 + cameraForce * noiseX,
-        noiseY * 2 + cameraForce * noiseY,
-        noiseZ * 2 + cameraForce * noiseZ
+        noiseY * 2 + cameraForce * noiseY
     );
 
     return force;
@@ -411,7 +411,7 @@ function setupControls() {
             config.perlinScale = value;
         });
 
-    gui.add(config, 'flowSpeed', 0.1, 2, 0.1)
+    gui.add(config, 'flowSpeed', 0.1, 20, 0.1)
         .name('Flow Speed')
         .onChange((value) => {
             config.flowSpeed = value;
@@ -497,7 +497,12 @@ function animate() {
 }
 
 function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const aspect = window.innerWidth / window.innerHeight;
+    const viewSize = 300;
+    camera.left = -viewSize * aspect;
+    camera.right = viewSize * aspect;
+    camera.top = viewSize;
+    camera.bottom = -viewSize;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 
