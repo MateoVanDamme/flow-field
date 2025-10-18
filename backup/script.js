@@ -27,7 +27,7 @@ const config = {
     flowSpeed: 20.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 2.0, // Smaller default size
-    bounds: 500
+    bounds: 0  // Will be set dynamically based on screen size
 };
 
 // Particle class
@@ -82,19 +82,22 @@ function init() {
     // Create scene
     scene = new THREE.Scene();
 
-    // Orthographic camera for 2D view
-    const aspect = window.innerWidth / window.innerHeight;
-    const viewSize = 300;
+    // Orthographic camera for 2D view - pixel-based (1 world unit = 1 pixel)
+    const halfWidth = window.innerWidth / 2;
+    const halfHeight = window.innerHeight / 2;
     camera = new THREE.OrthographicCamera(
-        -viewSize * aspect,
-        viewSize * aspect,
-        viewSize,
-        -viewSize,
+        -halfWidth,
+        halfWidth,
+        halfHeight,
+        -halfHeight,
         1,
         1000
     );
     camera.position.z = 100;
     camera.lookAt(0, 0, 0);
+
+    // Set bounds to fill the screen
+    config.bounds = Math.max(window.innerWidth, window.innerHeight);
 
     // Create renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -349,13 +352,18 @@ function animate() {
 }
 
 function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    const viewSize = 300;
-    camera.left = -viewSize * aspect;
-    camera.right = viewSize * aspect;
-    camera.top = viewSize;
-    camera.bottom = -viewSize;
+    // Update camera to match new pixel dimensions
+    const halfWidth = window.innerWidth / 2;
+    const halfHeight = window.innerHeight / 2;
+    camera.left = -halfWidth;
+    camera.right = halfWidth;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
     camera.updateProjectionMatrix();
+
+    // Update bounds to fill screen
+    config.bounds = Math.max(window.innerWidth, window.innerHeight);
+
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     // Resize render targets

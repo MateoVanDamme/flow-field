@@ -34,12 +34,12 @@ let forceFieldTexture, forceFieldMaterial, forceFieldPlane;
 
 // Configuration
 const config = {
-    particleCount: 10000,
+    particleCount: 50000,
     perlinScale: 0.007,
     flowSpeed: 20.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
-    particleSize: 0.2, // Smaller default size
-    bounds: 500,
+    particleSize: 2.0, // Smaller default size
+    bounds: 0,  // Will be set dynamically based on screen size
     cameraInfluence: 3.0  // How much the camera affects the flow field
 };
 
@@ -182,19 +182,22 @@ function getVideoBrightness(x, y, z) {
 function init() {
     scene = new THREE.Scene();
 
-    // Orthographic camera for 2D view
-    const aspect = window.innerWidth / window.innerHeight;
-    const viewSize = 300;
+    // Orthographic camera for 2D view - pixel-based (1 world unit = 1 pixel)
+    const halfWidth = window.innerWidth / 2;
+    const halfHeight = window.innerHeight / 2;
     camera = new THREE.OrthographicCamera(
-        -viewSize * aspect,
-        viewSize * aspect,
-        viewSize,
-        -viewSize,
+        -halfWidth,
+        halfWidth,
+        halfHeight,
+        -halfHeight,
         1,
         1000
     );
     camera.position.z = 100;
     camera.lookAt(0, 0, 0);
+
+    // Set bounds to fill the screen
+    config.bounds = Math.max(window.innerWidth, window.innerHeight);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -411,7 +414,7 @@ function setupControls() {
             config.perlinScale = value;
         });
 
-    gui.add(config, 'flowSpeed', 0.1, 20, 0.1)
+    gui.add(config, 'flowSpeed', 0.1, 40, 0.1)
         .name('Flow Speed')
         .onChange((value) => {
             config.flowSpeed = value;
@@ -424,7 +427,7 @@ function setupControls() {
             fadeMaterial.uniforms.trailDecay.value = value * 0.0001;
         });
 
-    gui.add(config, 'particleSize', 0.005, 0.5, 0.005)
+    gui.add(config, 'particleSize', 0.5, 5.0, 0.01)
         .name('Particle Size')
         .onChange((value) => {
             config.particleSize = value;
@@ -432,7 +435,7 @@ function setupControls() {
         });
 
     // Camera influence control
-    gui.add(config, 'cameraInfluence', 0, 10, 0.1)
+    gui.add(config, 'cameraInfluence', 0, 100, 0.1)
         .name('Camera Influence');
 
     gui.add(config, 'particleCount')
@@ -497,13 +500,18 @@ function animate() {
 }
 
 function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    const viewSize = 300;
-    camera.left = -viewSize * aspect;
-    camera.right = viewSize * aspect;
-    camera.top = viewSize;
-    camera.bottom = -viewSize;
+    // Update camera to match new pixel dimensions
+    const halfWidth = window.innerWidth / 2;
+    const halfHeight = window.innerHeight / 2;
+    camera.left = -halfWidth;
+    camera.right = halfWidth;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
     camera.updateProjectionMatrix();
+
+    // Update bounds to fill screen
+    config.bounds = Math.max(window.innerWidth, window.innerHeight);
+
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderTargetA.setSize(window.innerWidth, window.innerHeight);
