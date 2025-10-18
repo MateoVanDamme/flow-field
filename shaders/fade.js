@@ -16,18 +16,29 @@ uniform float fadeAmount;
 varying vec2 vUv;
 
 void main() {
-    // Simple box blur on the background
+    // Gaussian blur on the background
     vec2 texelSize = vec2(1.0 / 80.0, 1.0 / 60.0); // Size of one pixel in the low-res texture
+
+    // 3x3 Gaussian kernel (sigma ~= 1.0)
+    // [1  2  1]
+    // [2  4  2]  / 16
+    // [1  2  1]
+
     vec3 blurred = vec3(0.0);
 
-    // 3x3 blur kernel
-    for (float y = -1.0; y <= 1.0; y++) {
-        for (float x = -1.0; x <= 1.0; x++) {
-            vec2 offset = vec2(x, y) * texelSize;
-            blurred += texture2D(tBackground, vUv + offset).rgb;
-        }
-    }
-    blurred /= 9.0; // Average of 9 samples
+    blurred += texture2D(tBackground, vUv + vec2(-1.0, -1.0) * texelSize).rgb * 1.0;
+    blurred += texture2D(tBackground, vUv + vec2( 0.0, -1.0) * texelSize).rgb * 2.0;
+    blurred += texture2D(tBackground, vUv + vec2( 1.0, -1.0) * texelSize).rgb * 1.0;
+
+    blurred += texture2D(tBackground, vUv + vec2(-1.0,  0.0) * texelSize).rgb * 2.0;
+    blurred += texture2D(tBackground, vUv + vec2( 0.0,  0.0) * texelSize).rgb * 4.0;
+    blurred += texture2D(tBackground, vUv + vec2( 1.0,  0.0) * texelSize).rgb * 2.0;
+
+    blurred += texture2D(tBackground, vUv + vec2(-1.0,  1.0) * texelSize).rgb * 1.0;
+    blurred += texture2D(tBackground, vUv + vec2( 0.0,  1.0) * texelSize).rgb * 2.0;
+    blurred += texture2D(tBackground, vUv + vec2( 1.0,  1.0) * texelSize).rgb * 1.0;
+
+    blurred /= 16.0; // Normalize by sum of weights
 
     vec3 background = blurred * 0.3; // Darken the red camera preview
 

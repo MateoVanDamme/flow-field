@@ -1,4 +1,4 @@
-// Use three.js ImprovedNoise implementation
+// Camera-interactive flow field visualization
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
@@ -7,6 +7,7 @@ import { vertexShader, fragmentShader } from './shaders/fade.js';
 
 // Three.js Scene Setup
 let scene, camera, renderer;
+let backgroundScene, backgroundCamera;
 let perlin;
 let time = 0;
 let particles = [];
@@ -15,19 +16,31 @@ let particleSystem;
 // Render targets for trail persistence
 let renderTargetA, renderTargetB;
 let fadeScene, fadeCamera, fadeMaterial;
+let copyMaterial;
 let currentRenderTarget = 0;
 
 // Stats
 let stats;
+
+// Webcam
+let video, videoCanvas, videoContext;
+let videoData = null;
+const VIDEO_WIDTH = 80;  // Low res for performance (increase for better quality, decrease for better FPS)
+const VIDEO_HEIGHT = 60;
+
+// Force field visualization
+let forceFieldCanvas, forceFieldContext;
+let forceFieldTexture, forceFieldMaterial, forceFieldPlane;
 
 // Configuration
 const config = {
     particleCount: 10000,
     noiseScale: 0.003,
     flowSpeed: 0.5,
-    fadeSpeed: 0.992, // Higher = slower fade (0.95 = fast, 0.99 = very slow)
+    fadeSpeed: 0.992,
     particleSize: 2,
-    bounds: 500
+    bounds: 500,
+    cameraInfluence: 3.0  // How much the camera affects the flow field
 };
 
 // Particle class
@@ -39,39 +52,24 @@ class Particle {
             (Math.random() - 0.5) * config.bounds
         );
         this.velocity = new THREE.Vector3(0, 0, 0);
-
-        // Random size - bigger particles are slightly brighter blue
         this.size = 0.5 + Math.random() * 3;
-
-        // Color - all dark blue range, no white
         this.color = new THREE.Color();
-        const sizeNormalized = (this.size - 0.5) / 3; // 0 to 1
-
-        // All particles are shades of blue
+        const sizeNormalized = (this.size - 0.5) / 3;
         const brightness = Math.pow(sizeNormalized, 2);
 
-        // Dark blue to medium blue only
         this.color.setRGB(
-            0.05 + brightness * 0.25,  // R: very little red
-            0.15 + brightness * 0.35,  // G: some green
-            0.4 + brightness * 0.45    // B: strong blue
+            0.05 + brightness * 0.25,
+            0.15 + brightness * 0.35,
+            0.4 + brightness * 0.45
         );
     }
 
     update(time) {
-        // Get force from flow field
         const force = getForceField(this.position.x, this.position.y, this.position.z, time);
-
-        // Update velocity with force
         this.velocity.add(force.multiplyScalar(0.01 * config.flowSpeed));
-
-        // Apply damping
         this.velocity.multiplyScalar(0.97);
-
-        // Update position
         this.position.add(this.velocity);
 
-        // Wrap around bounds
         const halfBounds = config.bounds / 2;
         if (this.position.x > halfBounds) this.position.x = -halfBounds;
         if (this.position.x < -halfBounds) this.position.x = halfBounds;
@@ -82,11 +80,104 @@ class Particle {
     }
 }
 
+async function initWebcam() {
+    video = document.getElementById('webcam');
+    videoCanvas = document.getElementById('videoCanvas');
+    videoCanvas.width = VIDEO_WIDTH;
+    videoCanvas.height = VIDEO_HEIGHT;
+    videoContext = videoCanvas.getContext('2d', { willReadFrequently: true });
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: 'user'
+            }
+        });
+        video.srcObject = stream;
+        await video.play();
+        console.log('Webcam initialized and playing');
+    } catch (err) {
+        console.error('Error accessing webcam:', err);
+        alert('Camera access denied or not available. Please allow camera access and reload.');
+    }
+}
+
+function updateVideoData() {
+    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+    // Draw video to canvas at low resolution
+    videoContext.drawImage(video, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+    videoData = videoContext.getImageData(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT).data;
+
+    // Visualize the force field
+    drawForceField();
+}
+
+function drawForceField() {
+    if (!videoData || !forceFieldContext) return;
+
+    // Clear the canvas
+    forceFieldContext.clearRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+
+    // Draw each pixel based on brightness
+    for (let y = 0; y < VIDEO_HEIGHT; y++) {
+        for (let x = 0; x < VIDEO_WIDTH; x++) {
+            const index = (y * VIDEO_WIDTH + x) * 4;
+            const r = videoData[index];
+            const g = videoData[index + 1];
+            const b = videoData[index + 2];
+
+            // Calculate brightness (0-1)
+            const brightness = (r + g + b) / (3 * 255);
+
+            // Darker areas = stronger force (inverted)
+            const force = 1.0 - brightness;
+
+            // But show it correctly (not inverted) in the visualization
+            if (brightness > 0.1) {
+                const intensity = Math.floor(brightness * 255);
+                forceFieldContext.fillStyle = `rgb(${intensity}, 0, 0)`;
+                forceFieldContext.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
+    // Update the texture
+    forceFieldTexture.needsUpdate = true;
+}
+
+function getVideoBrightness(x, y, z) {
+    if (!videoData) return 0.5;
+
+    // Map 3D position to 2D video coordinates
+    const halfBounds = config.bounds / 2;
+    const normalizedX = (x + halfBounds) / config.bounds;
+    const normalizedY = (y + halfBounds) / config.bounds;
+
+    const videoX = Math.floor(normalizedX * VIDEO_WIDTH);
+    const videoY = Math.floor(normalizedY * VIDEO_HEIGHT);
+
+    if (videoX < 0 || videoX >= VIDEO_WIDTH || videoY < 0 || videoY >= VIDEO_HEIGHT) {
+        return 0.5;
+    }
+
+    const index = (videoY * VIDEO_WIDTH + videoX) * 4;
+    const r = videoData[index];
+    const g = videoData[index + 1];
+    const b = videoData[index + 2];
+
+    // Calculate brightness (0-1)
+    const brightness = (r + g + b) / (3 * 255);
+
+    // Invert so darker areas create stronger forces
+    return 1.0 - brightness;
+}
+
 function init() {
-    // Create scene
     scene = new THREE.Scene();
 
-    // Create camera
     camera = new THREE.PerspectiveCamera(
         75,
         window.innerWidth / window.innerHeight,
@@ -97,35 +188,56 @@ function init() {
     camera.position.y = 50;
     camera.lookAt(0, 0, 0);
 
-    // Create renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000, 0);
+    renderer.setClearColor(0x000000, 1);
     renderer.autoClear = false;
     document.body.appendChild(renderer.domElement);
 
-    // Initialize Perlin noise
     perlin = new ImprovedNoise();
 
-    // Setup Stats
     stats = new Stats();
     document.body.appendChild(stats.dom);
 
-    // Setup render targets for trail persistence
+    // Setup force field visualization canvas (offscreen)
+    forceFieldCanvas = document.createElement('canvas');
+    forceFieldCanvas.width = VIDEO_WIDTH;
+    forceFieldCanvas.height = VIDEO_HEIGHT;
+    forceFieldContext = forceFieldCanvas.getContext('2d');
+
+    // Create a texture from the canvas
+    forceFieldTexture = new THREE.CanvasTexture(forceFieldCanvas);
+    forceFieldTexture.minFilter = THREE.LinearFilter;
+    forceFieldTexture.magFilter = THREE.LinearFilter;
+
+    // Create orthographic background scene for force field
+    backgroundScene = new THREE.Scene();
+    backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // Create a fullscreen quad to show the force field
+    const planeGeometry = new THREE.PlaneGeometry(2, 2);
+    forceFieldMaterial = new THREE.MeshBasicMaterial({
+        map: forceFieldTexture,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false
+    });
+    forceFieldPlane = new THREE.Mesh(planeGeometry, forceFieldMaterial);
+    backgroundScene.add(forceFieldPlane);
+
+    console.log('Force field visualization initialized');
+
     setupRenderTargets();
-
-    // Create particles
     createParticles();
-
-    // Setup controls
     setupControls();
 
-    // Handle window resize
+    // Initialize webcam
+    initWebcam();
+
     window.addEventListener('resize', onWindowResize, false);
 }
 
 function setupRenderTargets() {
-    // Create two render targets for ping-pong rendering
     const renderTargetParams = {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
@@ -145,14 +257,13 @@ function setupRenderTargets() {
         renderTargetParams
     );
 
-    // Create a scene and camera for the fade effect
     fadeScene = new THREE.Scene();
     fadeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-    // Create a material that renders the previous frame with slight transparency
     fadeMaterial = new THREE.ShaderMaterial({
         uniforms: {
             tDiffuse: { value: null },
+            tBackground: { value: forceFieldTexture },
             fadeAmount: { value: config.fadeSpeed }
         },
         vertexShader,
@@ -161,25 +272,44 @@ function setupRenderTargets() {
         depthTest: false
     });
 
-    // Create a full-screen quad for the fade effect
+    // Simple copy shader (no fading)
+    copyMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            tDiffuse: { value: null }
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D tDiffuse;
+            varying vec2 vUv;
+            void main() {
+                gl_FragColor = texture2D(tDiffuse, vUv);
+            }
+        `,
+        depthWrite: false,
+        depthTest: false
+    });
+
     const planeGeometry = new THREE.PlaneGeometry(2, 2);
     const fadePlane = new THREE.Mesh(planeGeometry, fadeMaterial);
     fadeScene.add(fadePlane);
 }
 
 function createParticles() {
-    // Create particle instances
     for (let i = 0; i < config.particleCount; i++) {
         particles.push(new Particle());
     }
 
-    // Create circular sprite texture
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
 
-    // Create radial gradient for smooth circle
     const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
     gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.8)');
@@ -191,7 +321,6 @@ function createParticles() {
 
     const texture = new THREE.CanvasTexture(canvas);
 
-    // Create geometry for all particles
     const positions = new Float32Array(config.particleCount * 3);
     const colors = new Float32Array(config.particleCount * 3);
     const sizes = new Float32Array(config.particleCount);
@@ -205,7 +334,6 @@ function createParticles() {
         colors[i * 3 + 1] = particles[i].color.g;
         colors[i * 3 + 2] = particles[i].color.b;
 
-        // Vary particle sizes
         sizes[i] = particles[i].size;
     }
 
@@ -232,16 +360,22 @@ function createParticles() {
 function getForceField(x, y, z, t) {
     const scale = config.noiseScale;
 
-    // Use 4D noise (x, y, z, time) for animated flow field
+    // Base Perlin noise flow field
     const noiseX = perlin.noise(x * scale, y * scale, z * scale + t);
     const noiseY = perlin.noise(x * scale + 100, y * scale, z * scale + t);
     const noiseZ = perlin.noise(x * scale, y * scale + 100, z * scale + t);
 
-    // Convert noise (-1 to 1) to force vector
+    // Get brightness from camera feed
+    const brightness = getVideoBrightness(x, y, z);
+
+    // Darker areas (higher brightness value after inversion) create stronger forces
+    const cameraForce = brightness * config.cameraInfluence;
+
+    // Combine noise with camera influence
     const force = new THREE.Vector3(
-        noiseX * 2,
-        noiseY * 2,
-        noiseZ * 2
+        noiseX * 2 + cameraForce * noiseX,
+        noiseY * 2 + cameraForce * noiseY,
+        noiseZ * 2 + cameraForce * noiseZ
     );
 
     return force;
@@ -264,21 +398,18 @@ function updateParticles() {
 function setupControls() {
     const gui = new GUI();
 
-    // Noise Scale control
     gui.add(config, 'noiseScale', 0.001, 0.01, 0.001)
         .name('Noise Scale')
         .onChange((value) => {
             config.noiseScale = value;
         });
 
-    // Flow Speed control
     gui.add(config, 'flowSpeed', 0.1, 2, 0.1)
         .name('Flow Speed')
         .onChange((value) => {
             config.flowSpeed = value;
         });
 
-    // Trail Length (Fade Speed) control
     gui.add(config, 'fadeSpeed', 0.97, 0.9999, 0.0001)
         .name('Trail Length')
         .onChange((value) => {
@@ -286,7 +417,6 @@ function setupControls() {
             fadeMaterial.uniforms.fadeAmount.value = value;
         });
 
-    // Particle Size control
     gui.add(config, 'particleSize', 0.5, 5, 0.5)
         .name('Particle Size')
         .onChange((value) => {
@@ -294,12 +424,14 @@ function setupControls() {
             particleSystem.material.size = value;
         });
 
-    // Particle Count display (read-only)
+    // Camera influence control
+    gui.add(config, 'cameraInfluence', 0, 10, 0.1)
+        .name('Camera Influence');
+
     gui.add(config, 'particleCount')
         .name('Particle Count')
         .disable();
 
-    // Add keyboard shortcut to toggle GUI and Stats (press 'd' for debug)
     window.addEventListener('keydown', (e) => {
         if (e.key === 'd' || e.key === 'D') {
             if (gui._hidden) {
@@ -320,36 +452,38 @@ function animate() {
 
     stats.begin();
 
+    // Update video data every frame
+    updateVideoData();
+
     time += 0.005;
 
-    // Rotate camera slowly
-    camera.position.x = Math.sin(time * 0.1) * 300;
-    camera.position.z = Math.cos(time * 0.1) * 300;
-    camera.lookAt(0, 0, 0);
-
-    // Update particles
     updateParticles();
 
     // Ping-pong rendering for trail persistence
     const readBuffer = currentRenderTarget === 0 ? renderTargetA : renderTargetB;
     const writeBuffer = currentRenderTarget === 0 ? renderTargetB : renderTargetA;
 
-    // Step 1: Render previous frame with fade to writeBuffer
-    fadeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+    // Step 1: Render particles to writeBuffer (just particles, no background)
     renderer.setRenderTarget(writeBuffer);
     renderer.clear();
+
+    // Render previous frame with fade (background will be added in final render)
+    fadeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+    fadeMaterial.uniforms.tBackground.value = null; // No background in the buffer
     renderer.render(fadeScene, fadeCamera);
 
-    // Step 2: Render current particles on top (without clearing)
+    // Render current particles on top
     renderer.render(scene, camera);
 
-    // Step 3: Render final result to screen
+    // Step 2: Render final result to screen with background composited
     renderer.setRenderTarget(null);
     renderer.clear();
+
+    // Render with background + faded particles in ONE shader pass
     fadeMaterial.uniforms.tDiffuse.value = writeBuffer.texture;
+    fadeMaterial.uniforms.tBackground.value = forceFieldTexture;
     renderer.render(fadeScene, fadeCamera);
 
-    // Swap buffers
     currentRenderTarget = 1 - currentRenderTarget;
 
     stats.end();
@@ -360,7 +494,6 @@ function onWindowResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    // Resize render targets
     renderTargetA.setSize(window.innerWidth, window.innerHeight);
     renderTargetB.setSize(window.innerWidth, window.innerHeight);
 }
