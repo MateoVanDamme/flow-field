@@ -4,6 +4,7 @@ import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import Stats from 'three/addons/libs/stats.module.js';
 import { vertexShader, fragmentShader } from './shaders/fade.js';
+import { vertexShader as gradientVertexShader, fragmentShader as gradientFragmentShader } from './shaders/gradient.js';
 
 // Three.js Scene Setup
 let scene, camera, renderer;
@@ -23,14 +24,19 @@ let currentRenderTarget = 0;
 let stats;
 
 // Webcam
-let video, videoCanvas, videoContext;
-let videoData = null;
+let video, videoTexture, prevVideoTexture;
 const VIDEO_WIDTH = 80;  // Low res for performance (increase for better quality, decrease for better FPS)
 const VIDEO_HEIGHT = 60;
 
-// Force field visualization
-let forceFieldCanvas, forceFieldContext;
-let forceFieldTexture, forceFieldMaterial, forceFieldPlane;
+// Gradient calculation (now motion detection)
+let gradientRenderTarget;
+let gradientScene, gradientCamera, gradientMaterial;
+let gradientData = null;
+let prevFrameRenderTarget;
+
+// Force field visualization (arrow particles)
+let arrowParticles = [];
+let arrowParticleSystem;
 
 // Configuration
 const config = {
@@ -86,10 +92,6 @@ class Particle {
 
 async function initWebcam() {
     video = document.getElementById('webcam');
-    videoCanvas = document.getElementById('videoCanvas');
-    videoCanvas.width = VIDEO_WIDTH;
-    videoCanvas.height = VIDEO_HEIGHT;
-    videoContext = videoCanvas.getContext('2d', { willReadFrequently: true });
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -101,6 +103,12 @@ async function initWebcam() {
         });
         video.srcObject = stream;
         await video.play();
+
+        // Create video texture
+        videoTexture = new THREE.VideoTexture(video);
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+
         console.log('Webcam initialized and playing');
     } catch (err) {
         console.error('Error accessing webcam:', err);
@@ -109,74 +117,147 @@ async function initWebcam() {
 }
 
 function updateVideoData() {
-    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA || !videoTexture) return;
 
-    // Draw video to canvas at low resolution
-    videoContext.drawImage(video, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
-    videoData = videoContext.getImageData(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT).data;
+    // Calculate motion by comparing current frame with previous frame
+    gradientMaterial.uniforms.tVideo.value = videoTexture;
+    gradientMaterial.uniforms.tPrevFrame.value = prevFrameRenderTarget.texture;
+    renderer.setRenderTarget(gradientRenderTarget);
+    renderer.render(gradientScene, gradientCamera);
 
-    // Visualize the force field
-    drawForceField();
+    // Copy current video frame to prevFrame buffer for next frame
+    const copyScene = new THREE.Scene();
+    const copyMat = new THREE.MeshBasicMaterial({ map: videoTexture });
+    const copyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat);
+    copyScene.add(copyQuad);
+    renderer.setRenderTarget(prevFrameRenderTarget);
+    renderer.render(copyScene, gradientCamera);
+    renderer.setRenderTarget(null);
+
+    // Read back motion data to CPU for particle sampling
+    const pixelBuffer = new Uint8Array(VIDEO_WIDTH * VIDEO_HEIGHT * 4);
+    renderer.readRenderTargetPixels(gradientRenderTarget, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT, pixelBuffer);
+    gradientData = pixelBuffer;
+
+    // Update arrow visualization
+    updateArrowVisualization();
 }
 
-function drawForceField() {
-    if (!videoData || !forceFieldContext) return;
+function updateArrowVisualization() {
+    if (!gradientData || !arrowParticleSystem) return;
 
-    // Clear the canvas
-    forceFieldContext.clearRect(0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+    const positions = arrowParticleSystem.geometry.attributes.position.array;
+    const colors = arrowParticleSystem.geometry.attributes.color.array;
 
-    // Draw each pixel based on brightness
-    for (let y = 0; y < VIDEO_HEIGHT; y++) {
-        for (let x = 0; x < VIDEO_WIDTH; x++) {
-            const index = (y * VIDEO_WIDTH + x) * 4;
-            const r = videoData[index];
-            const g = videoData[index + 1];
-            const b = videoData[index + 2];
+    let particleIndex = 0;
+    const step = 50; // Sample spacing in screen pixels
+    const arrowLength = 15; // Length of arrows in screen pixels
 
-            // Calculate brightness (0-1)
-            const brightness = (r + g + b) / (3 * 255);
+    // Cover entire screen, including edges
+    for (let screenY = 0; screenY <= window.innerHeight; screenY += step) {
+        for (let screenX = 0; screenX <= window.innerWidth; screenX += step) {
+            if (particleIndex >= arrowParticles.length) break;
 
-            // Darker areas = stronger force (inverted)
-            const force = 1.0 - brightness;
+            // Convert screen coordinates to world coordinates
+            const worldX = screenX - window.innerWidth / 2;
+            const worldY = window.innerHeight / 2 - screenY;
 
-            // But show it correctly (not inverted) in the visualization
-            if (brightness > 0.1) {
-                const intensity = Math.floor(brightness * 255);
-                forceFieldContext.fillStyle = `rgb(${intensity}, 0, 0)`;
-                forceFieldContext.fillRect(x, y, 1, 1);
+            // Get gradient at this position
+            const gradient = getVideoGradient(worldX, worldY);
+            const magnitude = Math.sqrt(gradient.x * gradient.x + gradient.y * gradient.y);
+
+            if (magnitude > 0.01) {
+                // Normalize gradient (flip Y to fix upside-down)
+                const dx = (gradient.x / magnitude) * arrowLength;
+                const dy = -(gradient.y / magnitude) * arrowLength; // Flip Y here
+
+                // Start point of arrow
+                positions[particleIndex * 6] = worldX - dx / 2;
+                positions[particleIndex * 6 + 1] = worldY - dy / 2;
+                positions[particleIndex * 6 + 2] = 0;
+
+                // End point of arrow
+                positions[particleIndex * 6 + 3] = worldX + dx / 2;
+                positions[particleIndex * 6 + 4] = worldY + dy / 2;
+                positions[particleIndex * 6 + 5] = 0;
+
+                // Color - more reddish (less green)
+                const intensity = Math.min(magnitude * 0.5, 0.3); // Less green for more red
+                colors[particleIndex * 6] = 1.0; // R
+                colors[particleIndex * 6 + 1] = intensity; // G (reduced)
+                colors[particleIndex * 6 + 2] = 0.0; // B
+
+                colors[particleIndex * 6 + 3] = 1.0;
+                colors[particleIndex * 6 + 4] = intensity;
+                colors[particleIndex * 6 + 5] = 0.0;
+            } else {
+                // Hide this arrow by setting both points to same location
+                positions[particleIndex * 6] = 0;
+                positions[particleIndex * 6 + 1] = 0;
+                positions[particleIndex * 6 + 2] = 0;
+                positions[particleIndex * 6 + 3] = 0;
+                positions[particleIndex * 6 + 4] = 0;
+                positions[particleIndex * 6 + 5] = 0;
             }
+
+            particleIndex++;
         }
     }
 
-    // Update the texture
-    forceFieldTexture.needsUpdate = true;
+    arrowParticleSystem.geometry.attributes.position.needsUpdate = true;
+    arrowParticleSystem.geometry.attributes.color.needsUpdate = true;
 }
 
-function getVideoBrightness(x, y, z) {
-    if (!videoData) return 0.5;
+function getVideoGradient(x, y) {
+    if (!gradientData) return new THREE.Vector2(0, 0);
 
-    // Map 3D position to 2D video coordinates
+    // Map 2D position to video coordinates
     const halfBounds = config.bounds / 2;
     const normalizedX = (x + halfBounds) / config.bounds;
     const normalizedY = (y + halfBounds) / config.bounds;
 
-    const videoX = Math.floor(normalizedX * VIDEO_WIDTH);
-    const videoY = Math.floor(normalizedY * VIDEO_HEIGHT);
+    // Get continuous position in video space
+    const videoX = normalizedX * VIDEO_WIDTH;
+    const videoY = (1.0 - normalizedY) * VIDEO_HEIGHT; // Flip Y
 
-    if (videoX < 0 || videoX >= VIDEO_WIDTH || videoY < 0 || videoY >= VIDEO_HEIGHT) {
-        return 0.5;
+    // Get the 4 surrounding pixels for bilinear interpolation
+    const x0 = Math.floor(videoX);
+    const y0 = Math.floor(videoY);
+    const x1 = Math.min(x0 + 1, VIDEO_WIDTH - 1);
+    const y1 = Math.min(y0 + 1, VIDEO_HEIGHT - 1);
+
+    // Clamp to bounds
+    if (x0 < 0 || x0 >= VIDEO_WIDTH || y0 < 0 || y0 >= VIDEO_HEIGHT) {
+        return new THREE.Vector2(0, 0);
     }
 
-    const index = (videoY * VIDEO_WIDTH + videoX) * 4;
-    const r = videoData[index];
-    const g = videoData[index + 1];
-    const b = videoData[index + 2];
+    // Get fractional part for interpolation
+    const fx = videoX - x0;
+    const fy = videoY - y0;
 
-    // Calculate brightness (0-1)
-    const brightness = (r + g + b) / (3 * 255);
+    // Sample 4 corners
+    const getSample = (px, py) => {
+        const index = (py * VIDEO_WIDTH + px) * 4;
+        const gx = (gradientData[index] / 255.0) * 2.0 - 1.0;
+        const gy = (gradientData[index + 1] / 255.0) * 2.0 - 1.0;
+        return new THREE.Vector2(gx, -gy); // Flip Y
+    };
 
-    // Invert so darker areas create stronger forces
-    return 1.0 - brightness;
+    const v00 = getSample(x0, y0);
+    const v10 = getSample(x1, y0);
+    const v01 = getSample(x0, y1);
+    const v11 = getSample(x1, y1);
+
+    // Bilinear interpolation
+    const vx0 = v00.x * (1 - fx) + v10.x * fx;
+    const vx1 = v01.x * (1 - fx) + v11.x * fx;
+    const vx = vx0 * (1 - fy) + vx1 * fy;
+
+    const vy0 = v00.y * (1 - fx) + v10.y * fx;
+    const vy1 = v01.y * (1 - fx) + v11.y * fx;
+    const vy = vy0 * (1 - fy) + vy1 * fy;
+
+    return new THREE.Vector2(vx, vy);
 }
 
 function init() {
@@ -210,42 +291,59 @@ function init() {
     stats = new Stats();
     document.body.appendChild(stats.dom);
 
-    // Setup force field visualization canvas (offscreen)
-    forceFieldCanvas = document.createElement('canvas');
-    forceFieldCanvas.width = VIDEO_WIDTH;
-    forceFieldCanvas.height = VIDEO_HEIGHT;
-    forceFieldContext = forceFieldCanvas.getContext('2d');
-
-    // Create a texture from the canvas
-    forceFieldTexture = new THREE.CanvasTexture(forceFieldCanvas);
-    forceFieldTexture.minFilter = THREE.LinearFilter;
-    forceFieldTexture.magFilter = THREE.LinearFilter;
-
-    // Create orthographic background scene for force field
-    backgroundScene = new THREE.Scene();
-    backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-    // Create a fullscreen quad to show the force field
-    const planeGeometry = new THREE.PlaneGeometry(2, 2);
-    forceFieldMaterial = new THREE.MeshBasicMaterial({
-        map: forceFieldTexture,
-        transparent: true,
-        depthWrite: false,
-        depthTest: false
-    });
-    forceFieldPlane = new THREE.Mesh(planeGeometry, forceFieldMaterial);
-    backgroundScene.add(forceFieldPlane);
-
-    console.log('Force field visualization initialized');
+    // Setup gradient calculation
+    setupGradientCalculation();
 
     setupRenderTargets();
     createParticles();
+    createArrowVisualization();
     setupControls();
 
     // Initialize webcam
     initWebcam();
 
     window.addEventListener('resize', onWindowResize, false);
+}
+
+function setupGradientCalculation() {
+    // Create render target for motion detection
+    gradientRenderTarget = new THREE.WebGLRenderTarget(VIDEO_WIDTH, VIDEO_HEIGHT, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType
+    });
+
+    // Create render target to store previous frame
+    prevFrameRenderTarget = new THREE.WebGLRenderTarget(VIDEO_WIDTH, VIDEO_HEIGHT, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType
+    });
+
+    // Create scene for motion detection
+    gradientScene = new THREE.Scene();
+    gradientCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // Create motion detection shader material
+    gradientMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+            tVideo: { value: null },
+            tPrevFrame: { value: prevFrameRenderTarget.texture }
+        },
+        vertexShader: gradientVertexShader,
+        fragmentShader: gradientFragmentShader,
+        depthWrite: false,
+        depthTest: false
+    });
+
+    // Create fullscreen quad
+    const planeGeometry = new THREE.PlaneGeometry(2, 2);
+    const gradientPlane = new THREE.Mesh(planeGeometry, gradientMaterial);
+    gradientScene.add(gradientPlane);
+
+    console.log('Motion detection initialized');
 }
 
 function setupRenderTargets() {
@@ -275,11 +373,13 @@ function setupRenderTargets() {
     fadeMaterial = new THREE.ShaderMaterial({
         uniforms: {
             tDiffuse: { value: null },
-            tBackground: { value: forceFieldTexture },
+            tBackground: { value: null },
             trailDecay: { value: config.trailDecay * 0.0001 }
         },
         vertexShader,
         fragmentShader,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
         depthWrite: false,
         depthTest: false
     });
@@ -376,16 +476,14 @@ function getForceField(x, y, t) {
     const noiseX = perlin.noise(x * scale, y * scale, t);
     const noiseY = perlin.noise(x * scale + 100, y * scale, t);
 
-    // Get brightness from camera feed
-    const brightness = getVideoBrightness(x, y, 0);
+    // Get gradient from camera feed
+    const gradient = getVideoGradient(x, y);
 
-    // Darker areas (higher brightness value after inversion) create stronger forces
-    const cameraForce = brightness * config.cameraInfluence;
-
-    // Combine noise with camera influence (2D vector only)
+    // Add gradient force to the base perlin noise
+    // Gradient points from dark to bright, so particles flow along edges
     const force = new THREE.Vector2(
-        noiseX * 2 + cameraForce * noiseX,
-        noiseY * 2 + cameraForce * noiseY
+        noiseX * 2 + gradient.x * config.cameraInfluence,
+        noiseY * 2 + gradient.y * config.cameraInfluence
     );
 
     return force;
@@ -403,6 +501,40 @@ function updateParticles() {
     }
 
     particleSystem.geometry.attributes.position.needsUpdate = true;
+}
+
+function createArrowVisualization() {
+    // Calculate number of arrows needed
+    const step = 50; // Sample spacing in pixels
+    const arrowsX = Math.ceil(window.innerWidth / step);
+    const arrowsY = Math.ceil(window.innerHeight / step);
+    const arrowCount = arrowsX * arrowsY;
+
+    // Each arrow is a line segment = 2 vertices
+    const positions = new Float32Array(arrowCount * 2 * 3);
+    const colors = new Float32Array(arrowCount * 2 * 3);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.6,
+        linewidth: 2,
+        depthTest: false,
+        depthWrite: false
+    });
+
+    arrowParticleSystem = new THREE.LineSegments(geometry, material);
+    arrowParticleSystem.visible = false; // Hidden by default, toggle with 'd' key
+    scene.add(arrowParticleSystem);
+
+    // Store arrow count for update function
+    arrowParticles = new Array(arrowCount);
+
+    console.log(`Created ${arrowCount} arrow visualizations`);
 }
 
 function setupControls() {
@@ -447,9 +579,11 @@ function setupControls() {
             if (gui._hidden) {
                 gui.show();
                 stats.dom.style.display = 'block';
+                arrowParticleSystem.visible = true;
             } else {
                 gui.hide();
                 stats.dom.style.display = 'none';
+                arrowParticleSystem.visible = false;
             }
         }
     });
@@ -473,26 +607,38 @@ function animate() {
     const readBuffer = currentRenderTarget === 0 ? renderTargetA : renderTargetB;
     const writeBuffer = currentRenderTarget === 0 ? renderTargetB : renderTargetA;
 
-    // Step 1: Render particles to writeBuffer (just particles, no background)
+    // Step 1: Render particles to writeBuffer (NO arrows in the buffer)
+    const arrowsWereVisible = arrowParticleSystem.visible;
+    arrowParticleSystem.visible = false;
+
     renderer.setRenderTarget(writeBuffer);
     renderer.clear();
 
-    // Render previous frame with fade (background will be added in final render)
+    // Render previous frame with fade
     fadeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
-    fadeMaterial.uniforms.tBackground.value = null; // No background in the buffer
+    fadeMaterial.uniforms.tBackground.value = null;
     renderer.render(fadeScene, fadeCamera);
 
     // Render current particles on top
     renderer.render(scene, camera);
 
-    // Step 2: Render final result to screen with background composited
+    // Step 2: Render final result to screen
     renderer.setRenderTarget(null);
     renderer.clear();
 
-    // Render with background + faded particles in ONE shader pass
+    // First: render fresh arrows every frame if visible (no fade)
+    if (arrowsWereVisible) {
+        arrowParticleSystem.visible = true;
+        renderer.render(scene, camera);
+    }
+
+    // Second: composite faded particle trails on top
     fadeMaterial.uniforms.tDiffuse.value = writeBuffer.texture;
-    fadeMaterial.uniforms.tBackground.value = forceFieldTexture;
+    fadeMaterial.uniforms.tBackground.value = null;
     renderer.render(fadeScene, fadeCamera);
+
+    // Restore arrow visibility state
+    arrowParticleSystem.visible = arrowsWereVisible;
 
     currentRenderTarget = 1 - currentRenderTarget;
 
