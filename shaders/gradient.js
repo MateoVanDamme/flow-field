@@ -12,6 +12,7 @@ void main() {
 export const fragmentShader = `
 uniform sampler2D tVideo;
 uniform sampler2D tPrevFrame;
+uniform float motionThreshold;
 varying vec2 vUv;
 
 void main() {
@@ -46,6 +47,15 @@ void main() {
     // Normalize motion vector
     motionX *= 0.5;
     motionY *= 0.5;
+
+    // Calculate motion magnitude
+    float magnitude = sqrt(motionX * motionX + motionY * motionY);
+
+    // Apply threshold - zero out motion below threshold
+    if (magnitude < motionThreshold) {
+        motionX = 0.0;
+        motionY = 0.0;
+    }
 
     // Store motion as RG (red = X motion, green = Y motion)
     // Map from [-1, 1] to [0, 1] for storage in texture

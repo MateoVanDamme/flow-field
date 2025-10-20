@@ -46,7 +46,9 @@ const config = {
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 2.0, // Smaller default size
     bounds: 0,  // Will be set dynamically based on screen size
-    cameraInfluence: 3.0  // How much the camera affects the flow field
+    cameraInfluence: 3.0,  // How much the camera affects the flow field
+    showArrows: false,  // Toggle arrow visualization
+    motionThreshold: 0.1  // Minimum motion magnitude to register (0-1)
 };
 
 // Particle class
@@ -134,13 +136,15 @@ function updateVideoData() {
     renderer.render(copyScene, gradientCamera);
     renderer.setRenderTarget(null);
 
-    // Read back motion data to CPU for particle sampling
-    const pixelBuffer = new Uint8Array(VIDEO_WIDTH * VIDEO_HEIGHT * 4);
-    renderer.readRenderTargetPixels(gradientRenderTarget, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT, pixelBuffer);
-    gradientData = pixelBuffer;
+    // Only read back motion data to CPU if arrows are visible (expensive operation!)
+    if (config.showArrows) {
+        const pixelBuffer = new Uint8Array(VIDEO_WIDTH * VIDEO_HEIGHT * 4);
+        renderer.readRenderTargetPixels(gradientRenderTarget, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT, pixelBuffer);
+        gradientData = pixelBuffer;
 
-    // Update arrow visualization
-    updateArrowVisualization();
+        // Update arrow visualization
+        updateArrowVisualization();
+    }
 }
 
 function updateArrowVisualization() {
@@ -166,7 +170,8 @@ function updateArrowVisualization() {
             const gradient = getVideoGradient(worldX, worldY);
             const magnitude = Math.sqrt(gradient.x * gradient.x + gradient.y * gradient.y);
 
-            if (magnitude > 0.01) {
+            // Only show arrows with motion above threshold (using same threshold as shader)
+            if (magnitude > config.motionThreshold) {
                 // Normalize gradient (flip Y to fix upside-down)
                 const dx = (gradient.x / magnitude) * arrowLength;
                 const dy = -(gradient.y / magnitude) * arrowLength; // Flip Y here
@@ -191,13 +196,21 @@ function updateArrowVisualization() {
                 colors[particleIndex * 6 + 4] = intensity;
                 colors[particleIndex * 6 + 5] = 0.0;
             } else {
-                // Hide this arrow by setting both points to same location
+                // Hide arrow by collapsing it to a point
                 positions[particleIndex * 6] = 0;
                 positions[particleIndex * 6 + 1] = 0;
                 positions[particleIndex * 6 + 2] = 0;
                 positions[particleIndex * 6 + 3] = 0;
                 positions[particleIndex * 6 + 4] = 0;
                 positions[particleIndex * 6 + 5] = 0;
+
+                // Make it invisible
+                colors[particleIndex * 6] = 0.0;
+                colors[particleIndex * 6 + 1] = 0.0;
+                colors[particleIndex * 6 + 2] = 0.0;
+                colors[particleIndex * 6 + 3] = 0.0;
+                colors[particleIndex * 6 + 4] = 0.0;
+                colors[particleIndex * 6 + 5] = 0.0;
             }
 
             particleIndex++;
@@ -240,7 +253,7 @@ function getVideoGradient(x, y) {
         const index = (py * VIDEO_WIDTH + px) * 4;
         const gx = (gradientData[index] / 255.0) * 2.0 - 1.0;
         const gy = (gradientData[index + 1] / 255.0) * 2.0 - 1.0;
-        return new THREE.Vector2(gx, -gy); // Flip Y
+        return new THREE.Vector2(gx, gy);
     };
 
     const v00 = getSample(x0, y0);
@@ -330,7 +343,8 @@ function setupGradientCalculation() {
     gradientMaterial = new THREE.ShaderMaterial({
         uniforms: {
             tVideo: { value: null },
-            tPrevFrame: { value: prevFrameRenderTarget.texture }
+            tPrevFrame: { value: prevFrameRenderTarget.texture },
+            motionThreshold: { value: config.motionThreshold }
         },
         vertexShader: gradientVertexShader,
         fragmentShader: gradientFragmentShader,
@@ -567,8 +581,24 @@ function setupControls() {
         });
 
     // Camera influence control
-    gui.add(config, 'cameraInfluence', 0, 100, 0.1)
+    gui.add(config, 'cameraInfluence', 0, 10, 10)
         .name('Camera Influence');
+
+    // Motion threshold control
+    gui.add(config, 'motionThreshold', 0.0, 1.0, 0.5)
+        .name('Motion Threshold')
+        .onChange((value) => {
+            config.motionThreshold = value;
+            gradientMaterial.uniforms.motionThreshold.value = value;
+        });
+
+    // Arrow visualization toggle
+    gui.add(config, 'showArrows')
+        .name('Show Arrows')
+        .onChange((value) => {
+            config.showArrows = value;
+            arrowParticleSystem.visible = value;
+        });
 
     gui.add(config, 'particleCount')
         .name('Particle Count')
@@ -579,11 +609,9 @@ function setupControls() {
             if (gui._hidden) {
                 gui.show();
                 stats.dom.style.display = 'block';
-                arrowParticleSystem.visible = true;
             } else {
                 gui.hide();
                 stats.dom.style.display = 'none';
-                arrowParticleSystem.visible = false;
             }
         }
     });
