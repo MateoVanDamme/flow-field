@@ -155,7 +155,7 @@ function updateArrowVisualization() {
 
     let particleIndex = 0;
     const step = 50; // Sample spacing in screen pixels
-    const arrowLength = 15; // Length of arrows in screen pixels
+    const maxArrowLength = 30; // Maximum length of arrows in screen pixels
 
     // Cover entire screen, including edges
     for (let screenY = 0; screenY <= window.innerHeight; screenY += step) {
@@ -172,9 +172,12 @@ function updateArrowVisualization() {
 
             // Only show arrows with motion above threshold (using same threshold as shader)
             if (magnitude > config.motionThreshold) {
-                // Normalize gradient (flip Y to fix upside-down)
+                // Scale arrow length proportionally to magnitude
+                const arrowLength = magnitude * maxArrowLength;
+
+                // Normalize gradient
                 const dx = (gradient.x / magnitude) * arrowLength;
-                const dy = -(gradient.y / magnitude) * arrowLength; // Flip Y here
+                const dy = (gradient.y / magnitude) * arrowLength;
 
                 // Start point of arrow
                 positions[particleIndex * 6] = worldX - dx / 2;
@@ -186,14 +189,13 @@ function updateArrowVisualization() {
                 positions[particleIndex * 6 + 4] = worldY + dy / 2;
                 positions[particleIndex * 6 + 5] = 0;
 
-                // Color - more reddish (less green)
-                const intensity = Math.min(magnitude * 0.5, 0.3); // Less green for more red
+                // Color - pure red
                 colors[particleIndex * 6] = 1.0; // R
-                colors[particleIndex * 6 + 1] = intensity; // G (reduced)
+                colors[particleIndex * 6 + 1] = 0.0; // G
                 colors[particleIndex * 6 + 2] = 0.0; // B
 
                 colors[particleIndex * 6 + 3] = 1.0;
-                colors[particleIndex * 6 + 4] = intensity;
+                colors[particleIndex * 6 + 4] = 0.0;
                 colors[particleIndex * 6 + 5] = 0.0;
             } else {
                 // Hide arrow by collapsing it to a point
@@ -535,8 +537,8 @@ function createArrowVisualization() {
     const material = new THREE.LineBasicMaterial({
         vertexColors: true,
         transparent: true,
-        opacity: 0.6,
-        linewidth: 2,
+        opacity: 0.9,
+        linewidth: 3,
         depthTest: false,
         depthWrite: false
     });

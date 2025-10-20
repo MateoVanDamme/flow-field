@@ -59,6 +59,7 @@ void main() {
 
     // Store motion as RG (red = X motion, green = Y motion)
     // Map from [-1, 1] to [0, 1] for storage in texture
-    gl_FragColor = vec4(motionX * 0.5 + 0.5, motionY * 0.5 + 0.5, 0.0, 1.0);
+    // Flip Y to match screen coordinates
+    gl_FragColor = vec4(motionX * 0.5 + 0.5, -motionY * 0.5 + 0.5, 0.0, 1.0);
 }
 `;
