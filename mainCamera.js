@@ -1,10 +1,12 @@
-// Camera-interactive flow field visualization
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
-import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import Stats from 'three/addons/libs/stats.module.js';
 import { vertexShader, fragmentShader } from './shaders/fade.js';
 import { vertexShader as gradientVertexShader, fragmentShader as gradientFragmentShader } from './shaders/gradient.js';
+import { createParticleSystem, updateParticles } from './core/ParticleSystem.js';
+import { setupRenderTargets, resizeRenderTargets } from './core/RenderTargets.js';
+import { createOrthographicCamera, resizeCamera } from './core/Camera.js';
+import { setupControls } from './core/Controls.js';
 
 // Three.js Scene Setup
 let scene, camera, renderer;
@@ -51,46 +53,6 @@ const config = {
     motionThreshold: 0.1  // Minimum motion magnitude to register (0-1)
 };
 
-// Particle class
-class Particle {
-    constructor() {
-        this.position = new THREE.Vector3(
-            (Math.random() - 0.5) * config.bounds,
-            (Math.random() - 0.5) * config.bounds,
-            0  // 2D - all particles on the same Z plane
-        );
-        this.size = 0.5 + Math.random() * 2; // Less variation (3 -> 2)
-        this.color = new THREE.Color();
-        const sizeNormalized = (this.size - 0.5) / 2; // Adjust normalization
-        const brightness = Math.pow(sizeNormalized, 2);
-
-        this.color.setRGB(
-            0.05 + brightness * 0.25,
-            0.15 + brightness * 0.35,
-            0.4 + brightness * 0.45
-        );
-    }
-
-    update(time) {
-        // Use force field directly as velocity (2D only)
-        const force = getForceField(this.position.x, this.position.y, time);
-        this.position.x += force.x * 0.01 * config.flowSpeed;
-        this.position.y += force.y * 0.01 * config.flowSpeed;
-        // Z stays at 0
-
-        // Check if particle is out of bounds (2D only)
-        const halfBounds = config.bounds / 2;
-        if (this.position.x > halfBounds || this.position.x < -halfBounds ||
-            this.position.y > halfBounds || this.position.y < -halfBounds) {
-            // Teleport to random position
-            this.position.set(
-                (Math.random() - 0.5) * config.bounds,
-                (Math.random() - 0.5) * config.bounds,
-                0
-            );
-        }
-    }
-}
 
 async function initWebcam() {
     video = document.getElementById('webcam');
@@ -277,23 +239,9 @@ function getVideoGradient(x, y) {
 
 function init() {
     scene = new THREE.Scene();
-
-    // Orthographic camera for 2D view - pixel-based (1 world unit = 1 pixel)
-    const halfWidth = window.innerWidth / 2;
-    const halfHeight = window.innerHeight / 2;
-    camera = new THREE.OrthographicCamera(
-        -halfWidth,
-        halfWidth,
-        halfHeight,
-        -halfHeight,
-        1,
-        1000
-    );
-    camera.position.z = 100;
-    camera.lookAt(0, 0, 0);
-
-    // Set bounds to fill the screen
     config.bounds = Math.max(window.innerWidth, window.innerHeight);
+
+    camera = createOrthographicCamera(window.innerWidth, window.innerHeight);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -306,15 +254,42 @@ function init() {
     stats = new Stats();
     document.body.appendChild(stats.dom);
 
-    // Setup gradient calculation
     setupGradientCalculation();
 
-    setupRenderTargets();
-    createParticles();
-    createArrowVisualization();
-    setupControls();
+    const renderTargets = setupRenderTargets(
+        window.innerWidth,
+        window.innerHeight,
+        vertexShader,
+        fragmentShader,
+        config
+    );
+    renderTargetA = renderTargets.renderTargetA;
+    renderTargetB = renderTargets.renderTargetB;
+    fadeScene = renderTargets.fadeScene;
+    fadeCamera = renderTargets.fadeCamera;
+    fadeMaterial = renderTargets.fadeMaterial;
 
-    // Initialize webcam
+    const particleSystemData = createParticleSystem(scene, config);
+    particles = particleSystemData.particles;
+    particleSystem = particleSystemData.particleSystem;
+
+    createArrowVisualization();
+
+    setupControls(config, stats, {
+        onTrailDecayChange: (value) => {
+            fadeMaterial.uniforms.trailDecay.value = value * 0.0001;
+        },
+        onParticleSizeChange: (value) => {
+            particleSystem.material.size = value;
+        },
+        onMotionThresholdChange: (value) => {
+            gradientMaterial.uniforms.motionThreshold.value = value;
+        },
+        onShowArrowsChange: (value) => {
+            arrowParticleSystem.visible = value;
+        }
+    });
+
     initWebcam();
 
     window.addEventListener('resize', onWindowResize, false);
@@ -362,128 +337,6 @@ function setupGradientCalculation() {
     console.log('Motion detection initialized');
 }
 
-function setupRenderTargets() {
-    const renderTargetParams = {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.FloatType, // Use floating point for better precision
-        stencilBuffer: false
-    };
-
-    renderTargetA = new THREE.WebGLRenderTarget(
-        window.innerWidth,
-        window.innerHeight,
-        renderTargetParams
-    );
-
-    renderTargetB = new THREE.WebGLRenderTarget(
-        window.innerWidth,
-        window.innerHeight,
-        renderTargetParams
-    );
-
-    fadeScene = new THREE.Scene();
-    fadeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-    fadeMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-            tDiffuse: { value: null },
-            tBackground: { value: null },
-            trailDecay: { value: config.trailDecay * 0.0001 }
-        },
-        vertexShader,
-        fragmentShader,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        depthTest: false
-    });
-
-    // Simple copy shader (no fading)
-    copyMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-            tDiffuse: { value: null }
-        },
-        vertexShader: `
-            varying vec2 vUv;
-            void main() {
-                vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-        fragmentShader: `
-            uniform sampler2D tDiffuse;
-            varying vec2 vUv;
-            void main() {
-                gl_FragColor = texture2D(tDiffuse, vUv);
-            }
-        `,
-        depthWrite: false,
-        depthTest: false
-    });
-
-    const planeGeometry = new THREE.PlaneGeometry(2, 2);
-    const fadePlane = new THREE.Mesh(planeGeometry, fadeMaterial);
-    fadeScene.add(fadePlane);
-}
-
-function createParticles() {
-    for (let i = 0; i < config.particleCount; i++) {
-        particles.push(new Particle());
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.8)');
-    gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-
-    const positions = new Float32Array(config.particleCount * 3);
-    const colors = new Float32Array(config.particleCount * 3);
-    const sizes = new Float32Array(config.particleCount);
-
-    for (let i = 0; i < config.particleCount; i++) {
-        positions[i * 3] = particles[i].position.x;
-        positions[i * 3 + 1] = particles[i].position.y;
-        positions[i * 3 + 2] = particles[i].position.z;
-
-        colors[i * 3] = particles[i].color.r;
-        colors[i * 3 + 1] = particles[i].color.g;
-        colors[i * 3 + 2] = particles[i].color.b;
-
-        sizes[i] = particles[i].size;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-    const material = new THREE.PointsMaterial({
-        size: config.particleSize,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.7,
-        blending: THREE.NormalBlending,
-        depthWrite: false,
-        map: texture,
-        sizeAttenuation: true
-    });
-
-    particleSystem = new THREE.Points(geometry, material);
-    scene.add(particleSystem);
-}
 
 function getForceField(x, y, t) {
     const scale = config.perlinScale;
@@ -505,19 +358,6 @@ function getForceField(x, y, t) {
     return force;
 }
 
-function updateParticles() {
-    const positions = particleSystem.geometry.attributes.position.array;
-
-    for (let i = 0; i < config.particleCount; i++) {
-        particles[i].update(time);
-
-        positions[i * 3] = particles[i].position.x;
-        positions[i * 3 + 1] = particles[i].position.y;
-        positions[i * 3 + 2] = particles[i].position.z;
-    }
-
-    particleSystem.geometry.attributes.position.needsUpdate = true;
-}
 
 function createArrowVisualization() {
     // Calculate number of arrows needed
@@ -553,145 +393,52 @@ function createArrowVisualization() {
     console.log(`Created ${arrowCount} arrow visualizations`);
 }
 
-function setupControls() {
-    const gui = new GUI();
-
-    gui.add(config, 'perlinScale', 0.001, 0.01, 0.001)
-        .name('Perlin Scale')
-        .onChange((value) => {
-            config.perlinScale = value;
-        });
-
-    gui.add(config, 'flowSpeed', 0.1, 40, 0.1)
-        .name('Flow Speed')
-        .onChange((value) => {
-            config.flowSpeed = value;
-        });
-
-    gui.add(config, 'trailDecay', 0.1, 50, 0.1)
-        .name('Trail Decay')
-        .onChange((value) => {
-            config.trailDecay = value;
-            fadeMaterial.uniforms.trailDecay.value = value * 0.0001;
-        });
-
-    gui.add(config, 'particleSize', 0.5, 5.0, 0.01)
-        .name('Particle Size')
-        .onChange((value) => {
-            config.particleSize = value;
-            particleSystem.material.size = value;
-        });
-
-    // Camera influence control
-    gui.add(config, 'cameraInfluence', 0, 10, 10)
-        .name('Camera Influence');
-
-    // Motion threshold control
-    gui.add(config, 'motionThreshold', 0.0, 1.0, 0.5)
-        .name('Motion Threshold')
-        .onChange((value) => {
-            config.motionThreshold = value;
-            gradientMaterial.uniforms.motionThreshold.value = value;
-        });
-
-    // Arrow visualization toggle
-    gui.add(config, 'showArrows')
-        .name('Show Arrows')
-        .onChange((value) => {
-            config.showArrows = value;
-            arrowParticleSystem.visible = value;
-        });
-
-    gui.add(config, 'particleCount')
-        .name('Particle Count')
-        .disable();
-
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'd' || e.key === 'D') {
-            if (gui._hidden) {
-                gui.show();
-                stats.dom.style.display = 'block';
-            } else {
-                gui.hide();
-                stats.dom.style.display = 'none';
-            }
-        }
-    });
-
-    return gui;
-}
 
 function animate() {
     requestAnimationFrame(animate);
-
     stats.begin();
 
-    // Update video data every frame
     updateVideoData();
-
     time += 0.005;
 
-    updateParticles();
+    updateParticles(particles, particleSystem, time, config, getForceField);
 
-    // Ping-pong rendering for trail persistence
     const readBuffer = currentRenderTarget === 0 ? renderTargetA : renderTargetB;
     const writeBuffer = currentRenderTarget === 0 ? renderTargetB : renderTargetA;
 
-    // Step 1: Render particles to writeBuffer (NO arrows in the buffer)
     const arrowsWereVisible = arrowParticleSystem.visible;
     arrowParticleSystem.visible = false;
 
     renderer.setRenderTarget(writeBuffer);
     renderer.clear();
 
-    // Render previous frame with fade
     fadeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
     fadeMaterial.uniforms.tBackground.value = null;
     renderer.render(fadeScene, fadeCamera);
-
-    // Render current particles on top
     renderer.render(scene, camera);
 
-    // Step 2: Render final result to screen
     renderer.setRenderTarget(null);
     renderer.clear();
 
-    // First: render fresh arrows every frame if visible (no fade)
+    fadeMaterial.uniforms.tDiffuse.value = writeBuffer.texture;
+    fadeMaterial.uniforms.tBackground.value = null;
+    renderer.render(fadeScene, fadeCamera);
+
     if (arrowsWereVisible) {
         arrowParticleSystem.visible = true;
         renderer.render(scene, camera);
     }
 
-    // Second: composite faded particle trails on top
-    fadeMaterial.uniforms.tDiffuse.value = writeBuffer.texture;
-    fadeMaterial.uniforms.tBackground.value = null;
-    renderer.render(fadeScene, fadeCamera);
-
-    // Restore arrow visibility state
     arrowParticleSystem.visible = arrowsWereVisible;
-
     currentRenderTarget = 1 - currentRenderTarget;
-
     stats.end();
 }
 
 function onWindowResize() {
-    // Update camera to match new pixel dimensions
-    const halfWidth = window.innerWidth / 2;
-    const halfHeight = window.innerHeight / 2;
-    camera.left = -halfWidth;
-    camera.right = halfWidth;
-    camera.top = halfHeight;
-    camera.bottom = -halfHeight;
-    camera.updateProjectionMatrix();
-
-    // Update bounds to fill screen
+    resizeCamera(camera, window.innerWidth, window.innerHeight);
     config.bounds = Math.max(window.innerWidth, window.innerHeight);
-
     renderer.setSize(window.innerWidth, window.innerHeight);
-
-    renderTargetA.setSize(window.innerWidth, window.innerHeight);
-    renderTargetB.setSize(window.innerWidth, window.innerHeight);
+    resizeRenderTargets(renderTargetA, renderTargetB, window.innerWidth, window.innerHeight);
 }
 
 // Start the application
