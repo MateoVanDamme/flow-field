@@ -37,13 +37,13 @@ export function setupControls(config, stats, callbacks = {}) {
             .name('Camera Influence');
     }
 
-    // Motion threshold control (optional)
-    if ('motionThreshold' in config) {
-        gui.add(config, 'motionThreshold', 0.0, 1.0, 0.01)
-            .name('Motion Threshold')
+    // Edge detection width control (optional)
+    if ('edgeDetectionWidth' in config) {
+        gui.add(config, 'edgeDetectionWidth', 1.0, 50.0, 1.0)
+            .name('Edge Detection Width')
             .onChange((value) => {
-                config.motionThreshold = value;
-                callbacks.onMotionThresholdChange?.(value);
+                config.edgeDetectionWidth = value;
+                callbacks.onEdgeDetectionWidthChange?.(value);
             });
     }
 

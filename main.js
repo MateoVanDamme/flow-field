@@ -27,8 +27,8 @@ let stats;
 
 // Webcam
 let video, videoTexture;
-const VIDEO_WIDTH = 80;  // Low res for performance (increase for better quality, decrease for better FPS)
-const VIDEO_HEIGHT = 60;
+const VIDEO_WIDTH = 640;  // High res - Sobel is fast enough
+const VIDEO_HEIGHT = 480;
 
 // Gradient calculation
 let gradientRenderTarget;
@@ -49,7 +49,7 @@ const config = {
     bounds: 0,  // Will be set dynamically based on screen size
     cameraInfluence: 3.0,  // How much the camera affects the flow field
     showArrows: false,  // Toggle arrow visualization
-    motionThreshold: 0.1  // Minimum gradient magnitude to register (0-1)
+    edgeDetectionWidth: 20.0  // Sobel sampling distance (pixels) - controls edge thickness detection
 };
 
 
@@ -88,13 +88,13 @@ function updateVideoData() {
     renderer.render(gradientScene, gradientCamera);
     renderer.setRenderTarget(null);
 
-    // Only read back gradient data to CPU if arrows are visible (expensive operation!)
-    if (config.showArrows) {
-        const pixelBuffer = new Uint8Array(VIDEO_WIDTH * VIDEO_HEIGHT * 4);
-        renderer.readRenderTargetPixels(gradientRenderTarget, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT, pixelBuffer);
-        gradientData = pixelBuffer;
+    // Always read gradient data from GPU to CPU (needed for particle flow field)
+    const pixelBuffer = new Uint8Array(VIDEO_WIDTH * VIDEO_HEIGHT * 4);
+    renderer.readRenderTargetPixels(gradientRenderTarget, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT, pixelBuffer);
+    gradientData = pixelBuffer;
 
-        // Update arrow visualization
+    // Only update arrow visualization if arrows are visible
+    if (config.showArrows) {
         updateArrowVisualization();
     }
 }
@@ -106,7 +106,7 @@ function updateArrowVisualization() {
     const colors = arrowParticleSystem.geometry.attributes.color.array;
 
     let particleIndex = 0;
-    const step = 50; // Sample spacing in screen pixels
+    const step = 20; // Sample spacing in screen pixels (match high-res gradient)
     const maxArrowLength = 30; // Maximum length of arrows in screen pixels
 
     // Cover entire screen, including edges
@@ -122,8 +122,8 @@ function updateArrowVisualization() {
             const gradient = getVideoGradient(worldX, worldY);
             const magnitude = Math.sqrt(gradient.x * gradient.x + gradient.y * gradient.y);
 
-            // Only show arrows with gradient magnitude above threshold (using same threshold as shader)
-            if (magnitude > config.motionThreshold) {
+            // Show all arrows (no threshold filtering)
+            if (magnitude > 0.01) { // Only filter out near-zero to avoid division by zero
                 // Scale arrow length proportionally to magnitude
                 const arrowLength = magnitude * maxArrowLength;
 
@@ -272,8 +272,8 @@ function init() {
         onParticleSizeChange: (value) => {
             particleSystem.material.size = value;
         },
-        onMotionThresholdChange: (value) => {
-            gradientMaterial.uniforms.motionThreshold.value = value;
+        onEdgeDetectionWidthChange: (value) => {
+            gradientMaterial.uniforms.edgeDetectionWidth.value = value;
         },
         onShowArrowsChange: (value) => {
             arrowParticleSystem.visible = value;
@@ -302,7 +302,7 @@ function setupGradientCalculation() {
     gradientMaterial = new THREE.ShaderMaterial({
         uniforms: {
             tVideo: { value: null },
-            motionThreshold: { value: config.motionThreshold }
+            edgeDetectionWidth: { value: config.edgeDetectionWidth }
         },
         vertexShader: gradientVertexShader,
         fragmentShader: gradientFragmentShader,
@@ -341,8 +341,8 @@ function getForceField(x, y, t) {
 
 
 function createArrowVisualization() {
-    // Calculate number of arrows needed
-    const step = 50; // Sample spacing in pixels
+    // Calculate number of arrows needed - match high resolution gradient data
+    const step = 20; // Sample spacing in pixels (much denser for 640x480 gradient)
     const arrowsX = Math.ceil(window.innerWidth / step);
     const arrowsY = Math.ceil(window.innerHeight / step);
     const arrowCount = arrowsX * arrowsY;
