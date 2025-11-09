@@ -48,8 +48,8 @@ const config = {
     particleSize: 2.0, // Smaller default size
     bounds: 0,  // Will be set dynamically based on screen size
     cameraInfluence: 3.0,  // How much the camera affects the flow field
-    showArrows: false,  // Toggle arrow visualization
-    edgeDetectionWidth: 20.0  // Sobel sampling distance (pixels) - controls edge thickness detection
+    showArrows: true,  // Toggle arrow visualization
+    edgeDetectionWidth: 5.0  // Sobel sampling distance (pixels) - controls edge thickness detection
 };
 
 
@@ -365,7 +365,7 @@ function createArrowVisualization() {
     });
 
     arrowParticleSystem = new THREE.LineSegments(geometry, material);
-    arrowParticleSystem.visible = false; // Hidden by default, toggle with 'd' key
+    arrowParticleSystem.visible = config.showArrows; // Use config value
     scene.add(arrowParticleSystem);
 
     // Store arrow count for update function

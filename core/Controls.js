@@ -39,7 +39,7 @@ export function setupControls(config, stats, callbacks = {}) {
 
     // Edge detection width control (optional)
     if ('edgeDetectionWidth' in config) {
-        gui.add(config, 'edgeDetectionWidth', 1.0, 50.0, 1.0)
+        gui.add(config, 'edgeDetectionWidth', 0.0, 20.0, 0.5)
             .name('Edge Detection Width')
             .onChange((value) => {
                 config.edgeDetectionWidth = value;
