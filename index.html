@@ -3,10 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flow Field Visualization - Pure Noise</title>
+    <title>Flow Field Visualization - Camera Interactive</title>
+    <link rel="icon" type="image/x-icon" href="./favicon.ico">
     <link rel="stylesheet" href="style.css">
+    <style>
+        #webcam {
+            display: none;
+        }
+        #videoCanvas {
+            display: none;
+        }
+    </style>
 </head>
 <body>
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="videoCanvas"></canvas>
     <script type="importmap">
         {
             "imports": {

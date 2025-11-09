@@ -8,58 +8,38 @@ void main() {
 }
 `;
 
-// Fragment Shader - Frame differencing for motion detection
+// Fragment Shader - Spatial gradient calculation for edge detection
 export const fragmentShader = `
 uniform sampler2D tVideo;
-uniform sampler2D tPrevFrame;
 uniform float motionThreshold;
 varying vec2 vUv;
 
 void main() {
     vec2 texelSize = vec2(1.0 / 80.0, 1.0 / 60.0); // Video texture resolution
 
-    // Get current and previous frame brightness
-    vec3 current = texture2D(tVideo, vUv).rgb;
-    vec3 previous = texture2D(tPrevFrame, vUv).rgb;
+    // Sample neighboring pixels to calculate spatial gradient
+    float center = texture2D(tVideo, vUv).r;
+    float left = texture2D(tVideo, vUv + vec2(-texelSize.x, 0.0)).r;
+    float right = texture2D(tVideo, vUv + vec2(texelSize.x, 0.0)).r;
+    float top = texture2D(tVideo, vUv + vec2(0.0, texelSize.y)).r;
+    float bottom = texture2D(tVideo, vUv + vec2(0.0, -texelSize.y)).r;
 
-    float currentBrightness = (current.r + current.g + current.b) / 3.0;
-    float previousBrightness = (previous.r + previous.g + previous.b) / 3.0;
+    // Calculate gradient using Sobel operator (amplified by 3x for stronger effect)
+    float gradientX = (right - left) * 1.5;
+    float gradientY = (top - bottom) * 1.5;
 
-    // Calculate motion in local neighborhood to get direction
-    float motionX = 0.0;
-    float motionY = 0.0;
+    // Calculate gradient magnitude
+    float magnitude = sqrt(gradientX * gradientX + gradientY * gradientY);
 
-    // Sample 3x3 neighborhood for optical flow estimation
-    for (float dy = -1.0; dy <= 1.0; dy += 1.0) {
-        for (float dx = -1.0; dx <= 1.0; dx += 1.0) {
-            vec2 offset = vec2(dx, dy) * texelSize;
-
-            float currSample = texture2D(tVideo, vUv + offset).r;
-            float prevSample = texture2D(tPrevFrame, vUv).r;
-
-            float diff = currSample - prevSample;
-
-            motionX += diff * dx;
-            motionY += diff * dy;
-        }
-    }
-
-    // Normalize motion vector
-    motionX *= 0.5;
-    motionY *= 0.5;
-
-    // Calculate motion magnitude
-    float magnitude = sqrt(motionX * motionX + motionY * motionY);
-
-    // Apply threshold - zero out motion below threshold
+    // Apply threshold - zero out gradients below threshold
     if (magnitude < motionThreshold) {
-        motionX = 0.0;
-        motionY = 0.0;
+        gradientX = 0.0;
+        gradientY = 0.0;
     }
 
-    // Store motion as RG (red = X motion, green = Y motion)
+    // Store gradient as RG (red = X gradient, green = Y gradient)
     // Map from [-1, 1] to [0, 1] for storage in texture
-    // Flip Y to match screen coordinates
-    gl_FragColor = vec4(motionX * 0.5 + 0.5, -motionY * 0.5 + 0.5, 0.0, 1.0);
+    // Flip X to match horizontally flipped video
+    gl_FragColor = vec4(-gradientX * 0.5 + 0.5, gradientY * 0.5 + 0.5, 0.0, 1.0);
 }
 `;
