@@ -1,27 +1,21 @@
 # Flow Field Visualization
 
-An interactive 3D particle flow field visualization built with Three.js. Particles follow a Perlin noise-based flow field that's influenced by your webcam - darker areas in the camera feed create stronger forces, pulling particles toward you!
+An interactive particle flow field visualization built with Three.js. 50,000 particles follow a Perlin noise-based flow field influenced by real-time edge detection from your webcam - particles flow along detected edges in the camera feed!
 
 **[Live Demo](https://mateovandamme.github.io/flow-field/)**
 
 ## How It Works
 
-- **Flow Field**: Uses 3D Perlin noise (ImprovedNoise) to generate a smooth, animated vector field
-- **Camera Interaction**: Your webcam feed is analyzed in real-time - darker areas create stronger forces
-- **Visual Feedback**: A subtle red overlay shows the force field strength from your camera
-- **Particles**: 10,000 particles follow the combined flow field with velocity damping
-- **Trail Rendering**: Ping-pong render targets create persistent motion trails with custom fade shaders
-- **Performance**: Camera feed is analyzed at 80x60 resolution with Gaussian blur for smooth visualization
+The webcam feed is analyzed at 640x480 using Sobel edge detection running entirely on the GPU. Detected edges generate flow vectors (rotated 90°) that blend with Perlin noise to guide 50,000 particles. Ping-pong render targets create persistent motion trails. Red arrows can be toggled to visualize the gradient field in real-time.
 
 ## Controls
 
-Press **D** to show/hide debug controls (GUI + FPS counter):
-- **Noise Scale**: Granularity of the base flow field
-- **Flow Speed**: How quickly particles respond to forces
-- **Trail Length**: How long particle trails persist
-- **Particle Size**: Size of individual particles
-- **Camera Influence**: How much the camera affects the flow field (0 = pure noise, higher = camera-driven)
+Press **D** to toggle controls and FPS counter.
 
 ## Camera Permission
 
-The visualization requires webcam access to create the interactive force field. Allow camera permission when prompted by your browser.
+Webcam access required for edge detection.
+
+## Development
+
+Python notebook included at `python/gradient_test.ipynb` for testing gradient kernels (Derivative of Gaussian vs Sobel) before shader implementation.
