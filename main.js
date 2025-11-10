@@ -382,7 +382,7 @@ function animate() {
     updateVideoData();
     time += 0.005;
 
-    updateParticles(particles, particleSystem, time, config, getForceField);
+    updateParticles(particles, particleSystem, time, config, getForceField, getVideoGradient);
 
     const readBuffer = currentRenderTarget === 0 ? renderTargetA : renderTargetB;
     const writeBuffer = currentRenderTarget === 0 ? renderTargetB : renderTargetA;

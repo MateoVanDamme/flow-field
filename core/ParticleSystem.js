@@ -65,8 +65,9 @@ export function createParticleSystem(scene, config) {
     return { particles, particleSystem };
 }
 
-export function updateParticles(particles, particleSystem, time, config, getForceFieldFn) {
+export function updateParticles(particles, particleSystem, time, config, getForceFieldFn, getVideoGradientFn) {
     const positions = particleSystem.geometry.attributes.position.array;
+    const colors = particleSystem.geometry.attributes.color.array;
 
     // Hardcoded probability for random respawn (0.2% chance per frame ~= every 0.5 seconds at 60fps)
     const RESPAWN_PROBABILITY = 0.002;
@@ -86,7 +87,29 @@ export function updateParticles(particles, particleSystem, time, config, getForc
         positions[i * 3] = particles[i].position.x;
         positions[i * 3 + 1] = particles[i].position.y;
         positions[i * 3 + 2] = particles[i].position.z;
+
+        // Update color based on camera gradient influence
+        const gradient = getVideoGradientFn(particles[i].position.x, particles[i].position.y);
+        const gradientMagnitude = Math.sqrt(gradient.x * gradient.x + gradient.y * gradient.y);
+
+        // Scale gradient magnitude by camera influence to match actual effect on particles
+        const cameraInfluence = gradientMagnitude * config.cameraInfluence;
+
+        // Blend from base blue color to warm orange based on camera influence
+        // Base color (low influence): bluish
+        // High influence: warm orange
+        const influence = Math.min(cameraInfluence * 0.15, 1.0); // Subtle effect
+
+        const baseR = 0.05 + particles[i].baseBrightness * 0.25;
+        const baseG = 0.15 + particles[i].baseBrightness * 0.35;
+        const baseB = 0.4 + particles[i].baseBrightness * 0.45;
+
+        // Warm orange target: more red, some green, less blue
+        colors[i * 3] = baseR + influence * (0.9 - baseR);     // R (warm orange red)
+        colors[i * 3 + 1] = baseG + influence * (0.05 - baseG); // G (orange tint)
+        colors[i * 3 + 2] = baseB - influence * baseB * 0.7;    // B (reduce blue subtly)
     }
 
     particleSystem.geometry.attributes.position.needsUpdate = true;
+    particleSystem.geometry.attributes.color.needsUpdate = true;
 }

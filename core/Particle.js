@@ -10,12 +10,12 @@ export class Particle {
         this.size = 0.5 + Math.random() * 2;
         this.color = new THREE.Color();
         const sizeNormalized = (this.size - 0.5) / 2;
-        const brightness = Math.pow(sizeNormalized, 2);
+        this.baseBrightness = Math.pow(sizeNormalized, 2);
 
         this.color.setRGB(
-            0.05 + brightness * 0.25,
-            0.15 + brightness * 0.35,
-            0.4 + brightness * 0.45
+            0.05 + this.baseBrightness * 0.25,
+            0.15 + this.baseBrightness * 0.35,
+            0.4 + this.baseBrightness * 0.45
         );
     }
 
