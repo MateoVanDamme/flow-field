@@ -43,11 +43,11 @@ let arrowParticleSystem;
 const config = {
     particleCount: 50000,
     perlinScale: 0.007,
-    flowSpeed: 20.0,
+    flowSpeed: 40.0,
     trailDecay: 10, // User-friendly value (gets multiplied by 0.0001 in shader)
     particleSize: 2.0, // Smaller default size
     bounds: 0,  // Will be set dynamically based on screen size
-    cameraInfluence: 3.0,  // How much the camera affects the flow field
+    cameraInfluence: 10.0,  // How much the camera affects the flow field
     showArrows: true,  // Toggle arrow visualization
     edgeDetectionWidth: 5.0  // Sobel sampling distance (pixels) - controls edge thickness detection
 };

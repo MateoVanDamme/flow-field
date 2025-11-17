@@ -33,7 +33,7 @@ export function setupControls(config, stats, callbacks = {}) {
 
     // Camera influence control (optional, only if present in config)
     if ('cameraInfluence' in config) {
-        gui.add(config, 'cameraInfluence', 0, 10, 0.1)
+        gui.add(config, 'cameraInfluence', 0, 20, 1.0)
             .name('Camera Influence');
     }
 
